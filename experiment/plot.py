@@ -4,30 +4,156 @@ import neuralprocesses.torch as nps
 import stheno
 import torch
 from wbml.plot import tweak
+import numpy as np
 
 __all__ = ["visualise"]
 
 
-def visualise(model, gen, *, path, config, predict=nps.predict):
+def visualise(model, gen, *, path, config, predict=nps.predict, inc_ground_truth=False):
     """Plot the prediction for the first element of a batch."""
-    if config["dim_x"] == 1:
-        visualise_1d(
-            model,
-            gen,
-            path=path,
-            config=config,
-            predict=predict,
-        )
-    elif config["dim_x"] == 2:
-        visualise_2d(
-            model,
-            gen,
-            path=path,
-            config=config,
-            predict=predict,
-        )
+
+    if inc_ground_truth:
+        assert repr(gen) in ["bimodal_generator_class"], f"Ground Truth plotting not implemented for {gen} generator"
+
+        if config["dim_x"] == 1:
+            visualise_1d_gt(
+                model,
+                gen,
+                path=path,
+                config=config,
+                predict=predict,
+            )
+        else:
+            pass # not implemented
+
     else:
-        pass  # Not implemented. Just do nothing.
+        if config["dim_x"] == 1:
+            visualise_1d(
+                model,
+                gen,
+                path=path,
+                config=config,
+                predict=predict,
+            )
+        elif config["dim_x"] == 2:
+            visualise_2d(
+                model,
+                gen,
+                path=path,
+                config=config,
+                predict=predict,
+            )
+        else:
+            pass  # Not implemented. Just do nothing.
+
+
+##TODO: what to do if empty context set passed?
+def _sort_by_x(xs, ys):
+    xy = zip(xs, ys)
+    xy = sorted(xy)
+    sorted_xs, sorted_ys = list(np.array(xy)[:,0]), list(np.array(xy)[:,1])
+    return sorted_xs, sorted_ys
+
+
+## Currently only implemented for the bimodal generator.
+def visualise_1d_gt(model, gen, *, path, config, predict):
+    _batch, _ref = gen.generate_batch(return_ground_truth=True)
+    batch = nps.batch_index(_batch, slice(0, 1, None))
+    ref = nps.batch_index(_ref, slice(0, 1, None))
+
+    try:
+        plot_config = config["plot"][1]
+    except KeyError:
+        return
+
+    # Define points to predict at.
+    with B.on_device(batch["xt"]):
+        x = B.linspace(B.dtype(batch["xt"]), *plot_config["range"], 200)
+
+    # Predict with model.
+    with torch.no_grad():
+        mean, var, samples, _ = predict(
+            model,
+            batch["contexts"],
+            nps.AggregateInput(
+                *((x[None, None, :], i) for i in range(config["dim_y"]))
+            ),
+        )
+
+    plt.figure(figsize=(8, 6 * config["dim_y"]))
+
+    for i in range(config["dim_y"]):
+        plt.subplot(config["dim_y"], 1, 1 + i)
+
+        # Plot the ground truth contexts and targets
+        try:
+            x_ref_c, y_ref_c = _sort_by_x(nps.batch_xc(ref, i)[0, 0], nps.batch_yc(ref, i)[0])
+            x_ref_t, y_ref_t = _sort_by_x(nps.batch_xt(ref, i)[0, 0], nps.batch_yt(ref, i)[0])
+
+            plt.plot(
+            x_ref_c,
+            y_ref_c,
+            '+',
+            label="Ground Truth",
+            color='xkcd:green',
+            )
+
+            plt.plot(
+                x_ref_t,
+                y_ref_t,
+                '+',
+                color='xkcd:green',
+            )
+        except:
+            pass    ## empty context (or target, but realistically target) set.
+
+        # Plot context and target.
+        plt.scatter(
+            nps.batch_xc(batch, i)[0, 0],
+            nps.batch_yc(batch, i)[0],
+            label="Context",
+            style="train",
+            s=20,
+        )
+
+        plt.scatter(
+            nps.batch_xt(batch, i)[0, 0],
+            nps.batch_yt(batch, i)[0],
+            label="Target",
+            style="test",
+            s=20,
+        )
+
+        # Plot prediction.
+        err = 1.96 * B.sqrt(var[i][0, 0])
+        plt.plot(
+            x,
+            mean[i][0, 0],
+            label="Prediction",
+            style="pred",
+        )
+        plt.fill_between(
+            x,
+            mean[i][0, 0] - err,
+            mean[i][0, 0] + err,
+            style="pred",
+        )
+        plt.plot(
+            x,
+            B.transpose(samples[i][:10, 0, 0]),
+            style="pred",
+            ls="-",
+            lw=0.5,
+        )
+
+        for x_axvline in plot_config["axvline"]:
+            plt.axvline(x_axvline, c="k", ls="--", lw=0.5)
+
+        plt.xlim(B.min(x), B.max(x))
+        tweak()
+
+    plt.savefig(path)
+    plt.close()
 
 
 def visualise_1d(model, gen, *, path, config, predict):

@@ -47,7 +47,19 @@ def setup(name, args, config, *, num_tasks_train, num_tasks_cv, num_tasks_eval, 
         device=device,
     )[name]
 
-    gen_cv = lambda: nps.construct_predefined_gens(
+    # gen_cv = lambda: nps.construct_predefined_gens(
+    #     torch.float32,
+    #     seed=20,  # Use a different seed!
+    #     batch_size=args.batch_size,
+    #     num_tasks=num_tasks_cv,
+    #     dim_x=args.dim_x,
+    #     dim_y=args.dim_y,
+    #     pred_logpdf=True,
+    #     pred_logpdf_diag=True,
+    #     device=device,
+    # )[name]
+
+    gen_cv = nps.construct_predefined_gens(
         torch.float32,
         seed=20,  # Use a different seed!
         batch_size=args.batch_size,
@@ -87,7 +99,7 @@ def setup(name, args, config, *, num_tasks_train, num_tasks_cv, num_tasks_eval, 
     return gen_train, gen_cv, gens_eval
 
 
-for name in ["eq", "matern", "weakly-periodic", "sawtooth", "mixture"]:
+for name in ["eq", "matern", "weakly-periodic", "sawtooth", "mixture", "bimodal"]:
     register_data(
         name,
         partial(setup, name),
