@@ -7,6 +7,7 @@ from .dist import AbstractMultiOutputDistribution
 from .normal import _map_sample_output
 from .. import _dispatch
 from ..aggregate import Aggregate
+from ..datadims import data_dims
 from ..util import register_module
 
 __all__ = ["Transform", "TransformedMultiOutputDistribution"]
@@ -93,8 +94,8 @@ class Transform:
         def untransform_logdet(y):
             # Use the same approximations as above.
             y_clipped = B.minimum(B.maximum(y, B.exp(-20) * B.one(y)), 20 * B.one(y))
-            res = B.where(y > 20, B.zero(y), y_clipped - B.log(B.exp(y_clipped) - 1))
-            res = B.where(y < B.exp(-20), -B.log(y), res)
+            res = B.where(y > 20, B.one(y), B.exp(y_clipped) / (B.exp(y_clipped) - 1))
+            res = B.where(y < B.exp(-20), 1 / y, res)
             return res
 
         return cls(
@@ -133,29 +134,6 @@ class Transform:
             untransform_logdet=untransform_logdet,
         )
 
-    @classmethod
-    def signed_square(cls):
-        """Construct the transform `f(x) = sign(x) |x|^2`."""
-
-        def transform(x):
-            return B.sign(x) * (x * x)
-
-        def transform_deriv(x):
-            return 2 * B.abs(x)
-
-        def untransform(y):
-            return B.sign(y) * B.sqrt(B.abs(y))
-
-        def untransform_logdet(y):
-            return -B.log(2) - B.log(B.abs(y))
-
-        return cls(
-            transform=transform,
-            transform_deriv=transform_deriv,
-            untransform=untransform,
-            untransform_logdet=untransform_logdet,
-        )
-
 
 class TransformedMultiOutputDistribution(AbstractMultiOutputDistribution):
     """A transformed multi-output distribution.
@@ -167,19 +145,11 @@ class TransformedMultiOutputDistribution(AbstractMultiOutputDistribution):
     Attributes:
         dist (:class:`.AbstractMultiOutputDistribution`): Transformed distribution.
         transform (:class:`.Transform`): Transform.
-        shape (shape or :class:`neuralprocesses.aggregate.Aggregate`): Shape(s) of the
-            data before vectorising.
     """
 
     def __init__(self, dist, transform):
         self.dist = dist
         self.transform = transform
-
-    @property
-    def shape(self):
-        """shape (shape or :class:`neuralprocesses.aggregate.Aggregate`): Shape(s) of
-        the data before vectorising."""
-        return self.dist.shape
 
     def __repr__(self):
         return (
@@ -214,14 +184,14 @@ class TransformedMultiOutputDistribution(AbstractMultiOutputDistribution):
         return _map_aggregate(_var, self.dist.mean, self.dist.var)
 
     def logpdf(self, x):
-        def _logdet_sum(x, shape):
+        def _logdet_sum(x):
             return B.sum(
                 self.transform.untransform_logdet(x),
-                axis=tuple(range(-len(shape), 0)),
+                axis=tuple(range(-1 - data_dims(x), 0)),
             )
 
         logpdf = self.dist.logpdf(_map_aggregate(self.transform.untransform, x))
-        logdet = _sum_aggregate(_map_aggregate(_logdet_sum, x, self.shape))
+        logdet = _sum_aggregate(_map_aggregate(_logdet_sum, x))
         return logpdf + logdet
 
     def sample(self, *args, **kw_args):

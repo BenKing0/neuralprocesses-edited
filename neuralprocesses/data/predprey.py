@@ -1,10 +1,9 @@
 import lab as B
-import numpy as np
 import wbml.util
 from plum import convert
 from wbml.data.predprey import load
 
-from .data import DataGenerator, apply_task
+from .data import DataGenerator, new_batch
 from ..dist import AbstractDistribution
 from ..dist.uniform import UniformDiscrete, UniformContinuous
 
@@ -82,25 +81,26 @@ def _predprey_simulate(state, dtype, t0, t1, dt, t_target, *, batch_size=16):
     # Concatenate trajectory into a tensor.
     t, traj = zip(*traj)
     t = B.to_active_device(B.cast(dtype, B.stack(*t)))
-    traj = B.stack(*traj, axis=-1)
+    traj = B.stack(*traj, axis=-2)
 
     # Undo the sorting.
     t = B.take(t, inv_perm)
-    traj = B.take(traj, inv_perm, axis=-1)
+    traj = B.take(traj, inv_perm, axis=-2)
 
     return state, t, traj
 
 
 def _predprey_select_from_traj(t, y, t_target):
     inds = B.sum(B.cast(B.dtype_int(t), t_target[:, None] > t[None, :]), axis=1)
-    return B.take(y, inds, axis=-1)
+    return B.take(y, inds, axis=0)
 
 
 class PredPreyGenerator(DataGenerator):
-    """Predator–prey generator with simulated data.
+    """Predator–prey generator.
 
     Args:
         dtype (dtype): Data type to generate.
+        noise (float, optional): Observation noise. Defaults to 0.
         seed (int, optional): Seed. Defaults to 0.
         num_tasks (int, optional): Number of tasks to generate per epoch. Must be an
             integer multiple of `batch_size`. Defaults to 2^14.
@@ -109,37 +109,36 @@ class PredPreyGenerator(DataGenerator):
         dist_x (:class:`neuralprocesses.dist.dist.AbstractDistribution`, optional):
             Distribution of the inputs. Defaults to a uniform distribution over
             $[0, 100]$.
-        num_data (:class:`neuralprocesses.dist.dist.AbstractDistribution`, optional):
-            Distribution of the number of data points. Defaults to a uniform
-            distribution over $[150, 250]$.
+        dist_x_context (:class:`neuralprocesses.dist.dist.AbstractDistribution`,
+            optional): Distribution of the context inputs. Defaults to `dist_x`.
+        dist_x_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`,
+            optional): Distribution of the target inputs. Defaults to `dist_x`.
+        num_context (:class:`neuralprocesses.dist.dist.AbstractDistribution`, optional):
+            Distribution of the number of context inputs. Defaults to a uniform
+            distribution over $[25, 100]$.
         num_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`, optional):
             Distribution of the number of target inputs. Defaults to the fixed number
             100.
-        forecast_start (:class:`neuralprocesses.dist.dist.AbstractDistribution`,
-            optional): Distribution of the start of the forecasting task. Defaults to
-            a uniform distribution over $[25, 75]$.
-        mode (str, optional): Mode. Must be one of `"interpolation"`, `"forecasting"`,
-            `"reconstruction"`, or `"random"`. Defaults to `"random"`.
         device (str, optional): Device on which to generate data. Defaults to `"cpu"`.
 
     Attributes:
         dtype (dtype): Data type.
         float64 (dtype): Floating point version of `dtype` with 64 bits.
         int64 (dtype): Integer version of `dtype` with 64 bits.
+        noise (float): Observation noise.
         num_tasks (int): Number of tasks to generate per epoch. Is an integer multiple
             of `batch_size`.
         batch_size (int): Batch size.
         big_batch_size (int): Sizes of the big batch.
+        dist_x_context (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
+            Distribution of the context inputs.
+        dist_x_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
+            Distribution of the target inputs.
         num_batches (int): Number batches in an epoch.
-        dist_x (:class:`neuralprocesses.dist.dist.AbstractDistribution`): Distribution
-            of the inputs.
-        num_data (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
-            Distribution of the number of data points.
+        num_context (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
+            Distribution of the number of context inputs.
         num_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
             Distribution of the number of target inputs.
-        forecast_start (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
-            Distribution of the start of the forecasting task.
-        mode (str): Mode.
         state (random state): Random state.
         device (str): Device.
     """
@@ -148,170 +147,86 @@ class PredPreyGenerator(DataGenerator):
         self,
         dtype,
         seed=0,
+        noise=0,
         num_tasks=2**14,
         batch_size=16,
         big_batch_size=2048,
         dist_x=UniformContinuous(0, 100),
-        num_data=UniformDiscrete(150, 250),
+        dist_x_context=None,
+        dist_x_target=None,
+        num_context=UniformDiscrete(25, 100),
         num_target=UniformDiscrete(100, 100),
-        forecast_start=UniformContinuous(25, 75),
-        mode="random",
         device="cpu",
     ):
         super().__init__(dtype, seed, num_tasks, batch_size, device)
 
-        self.dist_x = convert(dist_x, AbstractDistribution)
-        self.num_data = convert(num_data, AbstractDistribution)
+        with B.on_device(self.device):
+            self.noise = B.to_active_device(B.cast(self.float64, noise))
+
+        self.dist_x_context = convert(dist_x_context or dist_x, AbstractDistribution)
+        self.dist_x_target = convert(dist_x_target or dist_x, AbstractDistribution)
+
+        self.num_context = convert(num_context, AbstractDistribution)
         self.num_target = convert(num_target, AbstractDistribution)
-        self.forecast_start = convert(forecast_start, AbstractDistribution)
-        self.mode = mode
 
         self.big_batch_size = big_batch_size
-        self._big_batch_x = None
+        self._big_batch_t = None
         self._big_batch_y = None
         self._big_batch_num_left = 0
 
-    def _get_from_big_batch(self):
+    def generate_batch(self):
         with B.on_device(self.device):
             if self._big_batch_num_left > 0:
                 # There is still some available from the big batch. Take that.
-                x, y = self._big_batch_x, self._big_batch_y[: self.batch_size]
+                t, y = self._big_batch_t, self._big_batch_y[: self.batch_size]
                 self._big_batch_y = self._big_batch_y[self.batch_size :]
                 self._big_batch_num_left -= 1
-                # Already convert to the target data type so `generate_batch` doesn't
-                # have to deal with this.
-                return (
-                    B.cast(self.dtype, x),
-                    B.cast(self.dtype, y),
-                )
             else:
-                # Use a resolution of 0.05. Also start ten years before 0 to allow the
-                # sim to reach steady state.
-                x = B.linspace(self.float64, -10, 100, 2200)
-
                 # For computational efficiency, we will not generate one batch, but
                 # `multiplier` many batches.
                 multiplier = max(self.big_batch_size // self.batch_size, 1)
 
                 # Simulate the equations.
-                self.state, x, y = _predprey_simulate(
+                self.state, t, y = _predprey_simulate(
                     self.state,
                     self.float64,
-                    B.min(x),
-                    B.max(x),
+                    0,
+                    100,
                     # Use a budget of 5000 steps.
-                    (B.max(x) - B.min(x)) / 5000,
-                    x,
+                    100 / 5000,
+                    # Generate observations at an $x$-resolution of `100 / 2000 = 0.05`.
+                    B.linspace(self.float64, 0, 100, 2000),
                     batch_size=multiplier * self.batch_size,
                 )
 
-                # Save the big batch and rerun generation to return the first slice.
-                self._big_batch_x = x
+                # Save the big batch and rerun generation.
+                self._big_batch_t = t
                 self._big_batch_y = y
                 self._big_batch_num_left = multiplier
-                return self._get_from_big_batch()
+                return self.generate_batch()
 
-    def generate_batch(self):
-        with B.on_device(self.device):
-            x_all, y_all = self._get_from_big_batch()
+            set_batch, xcs, xc, nc, xts, xt, nt = new_batch(self, 2)
+            x = B.concat(xc, xt, axis=-2)
 
-            # Sample inputs.
-            self.state, n_hare = self.num_data.sample(self.state, self.int64)
-            self.state, x_hare = self.dist_x.sample(self.state, self.dtype, n_hare)
-            x_hare = B.tile(B.transpose(x_hare)[None, :, :], self.batch_size, 1, 1)
-            self.state, n_lynx = self.num_data.sample(self.state, self.int64)
-            self.state, x_lynx = self.dist_x.sample(self.state, self.dtype, n_lynx)
-            x_lynx = B.tile(B.transpose(x_lynx)[None, :, :], self.batch_size, 1, 1)
-
-            # Sample data.
-            y_hare = _predprey_select_from_traj(x_all, y_all[:, 0:1, :], x_hare[0, 0])
-            y_lynx = _predprey_select_from_traj(x_all, y_all[:, 1:2, :], x_lynx[0, 0])
-
-            self.state, batch = apply_task(
-                self.state,
-                self.dtype,
-                self.int64,
-                self.mode,
-                (x_hare, x_lynx),
-                (y_hare, y_lynx),
-                self.num_target,
-                self.forecast_start,
+            # Select the right elements from the simulation output.
+            y = B.stack(
+                *(
+                    _predprey_select_from_traj(t, y[i, :, :], x[i, :, 0])
+                    for i in range(self.batch_size)
+                ),
+                axis=0
             )
 
+            # Add observation noise.
+            self.state, randn = B.randn(self.state, y)
+            y = y + B.abs(B.sqrt(self.noise) * randn)
+
+            # Generate the batch.
+            batch = {}
+            set_batch(batch, y[:, :nc, :], y[:, nc:, :])
             return batch
 
 
 class PredPreyRealGenerator(DataGenerator):
-    """The real hare–lynx data.
-
-    Args:
-        dtype (dtype): Data type to generate.
-        seed (int, optional): Seed. Defaults to 0.
-        num_tasks (int, optional): Number of tasks to generate per epoch. Must be an
-            integer multiple of `batch_size`. Defaults to 2^10.
-        num_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`, optional):
-            Distribution of the number of target inputs. Defaults to the fixed number
-            100.
-        forecast_start (:class:`neuralprocesses.dist.dist.AbstractDistribution`,
-            optional): Distribution of the start of the forecasting task. Defaults to
-            a uniform distribution over $[25, 75]$.
-        mode (str, optional): Mode. Must be one of `"interpolation"`, `"forecasting"`,
-            `"reconstruction"`, or `"random"`.
-        device (str, optional): Device on which to generate data. Defaults to `"cpu"`.
-
-    Attributes:
-        dtype (dtype): Data type.
-        float64 (dtype): Floating point version of `dtype` with 64 bits.
-        int64 (dtype): Integer version of `dtype` with 64 bits.
-        num_tasks (int): Number of tasks to generate per epoch. Is an integer multiple
-            of `batch_size`.
-        batch_size (int): Batch size.
-        forecast_start (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
-            Distribution of the start of the forecasting task.
-        num_target (:class:`neuralprocesses.dist.dist.AbstractDistribution`):
-            Distribution of the number of target inputs.
-        mode (str): Mode.
-        state (random state): Random state.
-        device (str): Device.
-    """
-
-    def __init__(
-        self,
-        dtype,
-        seed=0,
-        num_tasks=2**10,
-        num_target=UniformDiscrete(1, 20),
-        forecast_start=UniformContinuous(25, 75),
-        mode="interpolation",
-        device="cpu",
-    ):
-        super().__init__(dtype, seed, num_tasks, batch_size=1, device=device)
-
-        self.num_target = convert(num_target, AbstractDistribution)
-        self.forecast_start = convert(forecast_start, AbstractDistribution)
-        self.mode = mode
-
-        # Load the data.
+    def __init__(self, dtype):
         df = load()
-
-        with B.on_device(self.device):
-            # Convert the data frame to the framework tensor type.
-            self.x = B.cast(self.dtype, np.array(df.index - df.index[0]))
-            self.y = B.cast(self.dtype, np.array(df))
-            # Move them onto the GPU and make the shapes right.
-            self.x = B.to_active_device(self.x)[None, None, :]
-            self.y = B.transpose(B.to_active_device(self.y))[None, :, :]
-
-    def generate_batch(self):
-        with B.on_device(self.device):
-            self.state, batch = apply_task(
-                self.state,
-                self.dtype,
-                self.int64,
-                self.mode,
-                (self.x, self.x),
-                (self.y[:, 0:1, :], self.y[:, 1:2, :]),
-                self.num_target,
-                self.forecast_start,
-            )
-            return batch
