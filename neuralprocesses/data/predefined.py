@@ -4,6 +4,7 @@ from stheno import EQ, Matern52
 from .gp import GPGenerator
 from .mixture import MixtureGenerator
 from .sawtooth import SawtoothGenerator
+from .bimodal import BiModalGenerator
 from ..dist.uniform import UniformDiscrete, UniformContinuous
 
 __all__ = ["construct_predefined_gens"]
@@ -77,6 +78,14 @@ def construct_predefined_gens(
         )
         for name, kernel in kernels.items()
     }
+    gens["bimodal"] = BiModalGenerator(
+        dtype,
+        seed=seed,
+        noise=0,    ## irrelevant, as variance specified on call of generate_batch() and defaults to 1
+        num_context=UniformDiscrete(0, 30 * dim_x),
+        num_target=UniformDiscrete(50 * dim_x, 50 * dim_x),
+        **config,
+    )
     gens["sawtooth"] = SawtoothGenerator(
         dtype,
         seed=seed,
