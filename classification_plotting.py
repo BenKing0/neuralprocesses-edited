@@ -34,7 +34,7 @@ def _group_classes(inputs: np.ndarray, outputs: np.ndarray, grouper):
 
     
 ##NOTE: only defined for binary classification
-def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = [0.5, 0.5]):
+def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = [0.5, 0.5], device=None):
 
     def true_boundary(x, means, vars):
         norm1 = norm(loc=means[1], scale=vars[1])
@@ -78,7 +78,7 @@ def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = 
 
 
 ##NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
-def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_class: int = 0):
+def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_class: int = 0, device=None):
     '''
     Plot 2D xs belonging to 1 of K classes. Therefore dim_x = 2, dim_y = K.
 

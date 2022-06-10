@@ -1,6 +1,6 @@
 import lab as B
 import torch
-import numpy as np
+import random
 
 
 class example_data_gen:
@@ -49,12 +49,10 @@ class example_data_gen:
 
             def convert_data(points):
                 _xc, _yc, _xt, _yt = points
-                _xc, _yc = B.cast(torch.float32, np.array(_xc)), B.cast(torch.float32, np.array(_yc))
-                _xt, _yt = B.cast(torch.float32, np.array(_xt)), B.cast(torch.float32, np.array(_yt))
                 xc = B.transpose(_xc) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
                 xt = B.transpose(_xt)
-                yc = B.transpose(_yc)
-                yt = B.transpose(_yt)
+                yc = B.cast(torch.float32, B.expand_dims(_yc, axis=0))
+                yt = B.cast(torch.float32, B.expand_dims(_yt, axis=0))
                 return xc, yc, xt, yt
 
             epoch = []        
@@ -75,8 +73,8 @@ class example_data_gen:
 
     def batch(self, means, covariances, dim_x, nc_bounds, nt_bounds, priors):
         
-        nc = np.random.randint(nc_bounds[0], nc_bounds[1]+1)
-        nt = np.random.randint(nt_bounds[0], nt_bounds[1]+1)
+        nc = B.squeeze(torch.randint(low=nc_bounds[0], high=nc_bounds[1]+1, size=(1, )))
+        nt = B.squeeze(torch.randint(low=nt_bounds[0], high=nt_bounds[1]+1, size=(1,)))
         num_points = nc + nt
 
         ys = []
@@ -85,21 +83,17 @@ class example_data_gen:
 
         xs = []
         for y in ys:
-            mean = np.array(means[y])
-            covar = np.array(covariances[y]) 
+            mean = torch.tensor(means[y], dtype=torch.float32)
+            covar = torch.tensor(covariances[y], dtype=torch.float32) 
             
-            if dim_x == 1:
-                x = np.random.normal(mean, covar)
-                xs.append([x])
-            elif dim_x > 1:
-                x = np.random.multivariate_normal(mean, covar)
-                xs.append(x) ## of shape (num_points, dim_x)
+            x = torch.distributions.MultivariateNormal(mean, covar)
+            xs.append(x.sample()) ## of shape (num_points, dim_x)
 
         zipped = list(zip(xs, ys)) ## num_points each of form [list(x), int(y)]
-        np.random.shuffle(zipped)
+        random.shuffle(zipped)
         contexts, targets = zipped[:nc], zipped[nc:]
 
         xc, yc = list(zip(*contexts))
         xt, yt = list(zip(*targets))
 
-        return xc, yc, xt, yt ## of form (n, c)
+        return B.stack(*xc, axis=0), B.stack(*yc, axis=0), B.stack(*xt, axis=0), B.stack(*yt, axis=0) ## of form (n, c)

@@ -8,8 +8,10 @@ import numpy as np
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-from classification_data_gens import example_data_gen
-from classification_plotting import plot_classifier_1d, plot_classifier_2d
+# from classification_data_gens import example_data_gen
+# from classification_plotting import plot_classifier_1d, plot_classifier_2d
+from torch_classification_data_gens import example_data_gen
+from torch_classification_plotting import plot_classifier_1d, plot_classifier_2d
 
 
 class BernoulliDistribution(torch.nn.Module):
@@ -122,8 +124,7 @@ def train(state, model, opt, objective, gen, *, epoch):
     """Train for an epoch."""
     vals = []
     for batch in gen.epoch():
-        ##TODO: fix epochs for new bernoulli dsitribution
-        ##TODO: fix nans coming up (particularly for >5 epochs) - 'obj' becomes single nan value (BernoulliDistribution.logpdf becoming undefined?) - self.probs becomes > 1!!
+        print('data gen device:', B.device(batch['xc']))
         state, obj = objective(
             state,
             model,
@@ -172,8 +173,6 @@ def eval(state, model, objective, gen):
 
 def main(config, _config):
 
-    state = B.create_random_state(torch.float32)
-
     model = construct_bernoulli_model(
         dim_x = config.dim_x,
         dim_y = config.dim_y,
@@ -188,6 +187,10 @@ def main(config, _config):
     B.set_global_device(device)
     model = model.to(device)
     out.kv("Number of parameters", nps.num_params(model))
+    print('global device: ', B.ActiveDevice.active_name)
+    print('model device: ', device)
+
+    state = B.create_random_state(torch.float32)
 
     out.report_time = True
     B.epsilon = 1e-8
@@ -226,9 +229,9 @@ def main(config, _config):
 
     ## generated epochs from these are of shape (b, c, n)
     gen_train, gen_cv, gens_eval = [    
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors),
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors),
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors),
+        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
         ]
 
     objective = partial(
@@ -261,9 +264,9 @@ def main(config, _config):
 
         for i in range(config.evaluate_plot_num_samples):
             if config.dim_x == 1:
-                plot_classifier_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, prior=priors)
+                plot_classifier_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
             elif config.dim_x == 2:
-                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, priors=priors)
+                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, priors=priors, device=device)
 
         with out.Section('ELBO'):
             # for gen_name, gen in gens_eval():
@@ -329,9 +332,9 @@ def main(config, _config):
                     )
 
                 if config.dim_x == 1:
-                    plot_classifier_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, prior=priors)
+                    plot_classifier_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
                 elif config.dim_x == 2:
-                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, priors=priors)
+                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, priors=priors, device=device)
 
 
 if __name__ == '__main__':
@@ -360,12 +363,12 @@ if __name__ == '__main__':
         "dim_y": 1, ##NOTE: Has to be the case for binary classification
         "dim_lv": 16,
         "data": 'binary_MoG',   ##NOTE: Not yet implemented
-        "lv_encoder": 'lowrank',
+        "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 15,
         "resume_at_epoch": None, 
         "train_test": None,
-        "evaluate": False,
+        "evaluate": True,
         "evaluate_fast": False, ##NOTE: Not implemented
         "rate": 3e-4,
         "evaluate_last": False,
@@ -375,7 +378,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "fix_noise": True, ##NOTE: Not implemented
-        "num_batches": 32,
+        "num_batches": 16,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
