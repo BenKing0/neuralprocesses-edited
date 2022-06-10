@@ -38,7 +38,8 @@ def construct_bernoulli_model(
     dim_x = 1, 
     dim_y = 1, 
     dim_lv = 16,
-    lv_likelihood = 'lowrank'
+    lv_likelihood = 'lowrank',
+    discretisation = 16,
     ):
     """
     Construct a model with a Gaussian heterogenous or a lowrank approximated encoder likelihood (if dim_lv > 0)
@@ -93,7 +94,7 @@ def construct_bernoulli_model(
 
     # Discretisation of the functional embedding:
     disc = nps.Discretisation(
-        points_per_unit=64,
+        points_per_unit=discretisation,
         multiple=2**unet.num_halving_layers,
         margin=0.1,
         dim=dim_x,
@@ -123,8 +124,8 @@ def construct_bernoulli_model(
 def train(state, model, opt, objective, gen, *, epoch):
     """Train for an epoch."""
     vals = []
-    for batch in gen.epoch():
-        print('data gen device:', B.device(batch['xc']))
+    for i, batch in enumerate(gen.epoch()):
+        if i == 0: print('data gen device:', B.device(batch['xc']))
         state, obj = objective(
             state,
             model,
@@ -178,6 +179,7 @@ def main(config, _config):
         dim_y = config.dim_y,
         dim_lv = config.dim_lv,
         lv_likelihood = config.lv_likelihood,
+        discretisation = config.discretisation,
     )
 
     if torch.cuda.is_available():
@@ -185,10 +187,10 @@ def main(config, _config):
     else:
         device = "cpu"
     B.set_global_device(device)
-    model = model.to(device)
-    out.kv("Number of parameters", nps.num_params(model))
     print('global device: ', B.ActiveDevice.active_name)
     print('model device: ', device)
+    model = model.to(device)
+    out.kv("Number of parameters", nps.num_params(model))
 
     state = B.create_random_state(torch.float32)
 
@@ -358,17 +360,17 @@ if __name__ == '__main__':
         "likelihood": 'bernoulli',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'ConvCorrBNP',
+        "model": '_IGNORE_ConvCorrBNP',
         "dim_x": 2,
         "dim_y": 1, ##NOTE: Has to be the case for binary classification
-        "dim_lv": 16,
+        "dim_lv": 1,
         "data": 'binary_MoG',   ##NOTE: Not yet implemented
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 15,
+        "epochs": 1,
         "resume_at_epoch": None, 
         "train_test": None,
-        "evaluate": True,
+        "evaluate": False,
         "evaluate_fast": False, ##NOTE: Not implemented
         "rate": 3e-4,
         "evaluate_last": False,
@@ -378,7 +380,8 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "fix_noise": True, ##NOTE: Not implemented
-        "num_batches": 16,
+        "num_batches": 1,
+        "discretisation": 16,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 

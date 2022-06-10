@@ -45,6 +45,7 @@ class example_data_gen:
 
 
     def epoch(self):
+
         with B.on_device(self.device):
 
             def convert_data(points):
@@ -61,10 +62,10 @@ class example_data_gen:
                 xc, yc, xt, yt = convert_data(_points)
 
                 batch = {
-                    'xc': xc,
-                    'yc': yc,
-                    'xt': xt,
-                    'yt': yt,
+                    'xc': xc.to(self.device),
+                    'yc': yc.to(self.device),
+                    'xt': xt.to(self.device),
+                    'yt': yt.to(self.device),
                 }
                 epoch.append(batch)
 

@@ -55,7 +55,7 @@ def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = 
         
         rhos = B.squeeze(class_1_probs) ## (1, n) => (n, )
         membership = B.cast(torch.float32, rhos > 0.5)
-        groups = _group_classes(B.squeeze(batch['xt']), rhos, membership)
+        groups = _group_classes(B.to_numpy(B.squeeze(batch['xt'])), B.to_numpy(rhos), B.to_numpy(membership))
 
         ## generate smooth prediction line for visualisation purposes
         smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt']), B.max(*batch['xt']), 1000), axis=0)
@@ -68,8 +68,8 @@ def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = 
         cs = ['xkcd:light red', 'xkcd:light blue']
         for class_, group in groups:
             plt.plot(group.x, group.y, '+', color=cs[class_], label=f'{class_} predicted')
-        plt.plot(B.squeeze(smooth_xs), smooth_preds, '-', color='xkcd:green', label='Smoothed')
-        plt.plot(B.squeeze(smooth_xs), B.cast(torch.float32, true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars)), 'k-', label='Truth')
+        plt.plot(B.to_numpy(B.squeeze(smooth_xs)), B.to_numpy(smooth_preds), '-', color='xkcd:green', label='Smoothed')
+        plt.plot(B.to_numpy(B.squeeze(smooth_xs)), true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars), 'k-', label='Truth')
         plt.ylim(-0.1, 1.1)
         plt.ylabel('Posterior Prob. of Class 1')
         plt.xlabel('x')
@@ -101,7 +101,7 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
         np_batch = B.to_numpy(batch)
         np_probs = B.to_numpy(prob_vectors)
         memberships = B.argmax(prob_vectors, axis=0) ## convert (k, n) array of probabilities to (n, ) integers
-        x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], memberships)
+        x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(memberships))
 
         # _num = 100
         # _hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), _num)
@@ -113,10 +113,14 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
 
         sns.set_theme()
         markers = itertools.cycle(('x', '+', '.', 'o', '*'))
-        for class_, _ in groups:
+        for class_, group in groups:
             x = x_dict[class_]
-            plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} predicted')
+            plt.scatter(x[:,0], x[:,1], marker=next(markers), c=group.y, cmap='plasma', label=f'{class_} predicted')
         plt.legend()
+        if B.max(memberships) == 1:
+            plt.title('Colormap scaled by class 1')
+        else:
+            plt.title(f'Colormap scaled by class {hmap_class}')
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.close()
 
