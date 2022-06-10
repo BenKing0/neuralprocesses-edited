@@ -100,22 +100,30 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
 
         np_batch = B.to_numpy(batch)
         np_probs = B.to_numpy(prob_vectors)
-        memberships = B.argmax(prob_vectors, axis=0) ## convert (k, n) array of probabilities to (n, ) integers
-        x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(memberships))
+        if np_batch['xc'].shape[0] == 1:
+            memberships = B.cast(torch.int32, prob_vectors > 0.5)
+            true_memberships = B.cast(torch.int32, batch['yt'])
+        else:
+            memberships = B.argmax(prob_vectors, axis=0) ## convert (k, n) array of probabilities to (n, ) integers
+            true_memberships = B.argmax(batch['yt'], axis=0)
+        x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(B.squeeze(true_memberships)))
 
-        # _num = 100
-        # _hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), _num)
-        # _hmap_X = np.meshgrid(_hmap_x, _hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
-        # hmap_X = np.array(_hmap_X).reshape((2, _num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
-        # _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
-        # _hmap_probs = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
-        # hmap_probs = B.to_numpy(_hmap_probs).reshape((_num, _num))
+        _num = 150
+        _hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), _num)
+        _hmap_X = np.meshgrid(_hmap_x, _hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
+        hmap_X = np.array(_hmap_X).reshape((2, _num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
+        _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
+        _hmap_probs = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
+        hmap_probs = B.to_numpy(_hmap_probs).reshape((_num, _num))
 
         sns.set_theme()
+        sns.set_theme()
+        plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4)   
+        plt.colorbar()
         markers = itertools.cycle(('x', '+', '.', 'o', '*'))
-        for class_, group in groups:
+        for class_, _ in groups:
             x = x_dict[class_]
-            plt.scatter(x[:,0], x[:,1], marker=next(markers), c=group.y, cmap='plasma', label=f'{class_} predicted')
+            plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
         plt.legend()
         if B.max(memberships) == 1:
             plt.title('Colormap scaled by class 1')

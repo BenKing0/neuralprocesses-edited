@@ -98,9 +98,9 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
     np_batch = B.to_numpy(batch)
     np_probs = B.to_numpy(prob_vectors)
     memberships = B.argmax(prob_vectors, axis=0) ## convert (k, n) array of probabilities to (n, ) integers
-    x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], memberships)
+    x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(B.squeeze(batch['yt'])))
 
-    _num = 100
+    _num = 200
     _hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), _num)
     _hmap_X = np.meshgrid(_hmap_x, _hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
     hmap_X = np.array(_hmap_X).reshape((2, _num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
@@ -109,16 +109,17 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
     hmap_probs = B.to_numpy(_hmap_probs).reshape((_num, _num))
 
     sns.set_theme()
+    plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4)   
+    plt.colorbar()
     markers = itertools.cycle(('x', '+', '.', 'o', '*'))
-    colours = ['xkcd:blue', 'xkcd:red', 'xkcd:green'] ## how to build-in colours using colours[class_ % len(colours)]
     for class_, _ in groups:
         x = x_dict[class_]
-        plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} predicted')
-    plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1)   
+        plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
+    if B.max(memberships) == 1:
+        plt.title('Colormap scaled by class 1')
+    else:
+        plt.title(f'Colormap scaled by class {hmap_class}')
     plt.legend()
     plt.savefig(save_path, bbox_inches='tight', dpi=300)
     plt.close()
 
-    ##TODO: 
-    # 1. add colors in plots to signify ground truth
-    # 2. fix hmap
