@@ -1,3 +1,5 @@
+##NOTE: Depracated, the torch version is used now!
+
 import lab as B
 import torch
 import numpy as np

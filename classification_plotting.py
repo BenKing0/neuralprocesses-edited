@@ -1,3 +1,5 @@
+##NOTE: Depracated, the torch version is used now!
+
 from scipy.stats import norm
 import torch
 import lab as B

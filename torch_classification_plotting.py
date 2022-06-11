@@ -100,7 +100,7 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
 
         np_batch = B.to_numpy(batch)
         np_probs = B.to_numpy(prob_vectors)
-        if np_batch['xc'].shape[0] == 1:
+        if batch['yt'].shape[0] == 1:
             memberships = B.cast(torch.int32, prob_vectors > 0.5)
             true_memberships = B.cast(torch.int32, batch['yt'])
         else:
@@ -118,7 +118,7 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
 
         sns.set_theme()
         sns.set_theme()
-        plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4)   
+        plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4, shading='auto')   
         plt.colorbar()
         markers = itertools.cycle(('x', '+', '.', 'o', '*'))
         for class_, _ in groups:
