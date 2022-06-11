@@ -52,8 +52,8 @@ class example_data_gen:
             _means = []
             _covars = []
             for i, mean in enumerate(self.means):
-                _mean = torch.tensor(mean).clone().detach()
-                _covar = torch.tensor(self.covariances[i]).clone().detach()
+                _mean = torch.tensor(mean).clone().to(self.device)
+                _covar = torch.tensor(self.covariances[i]).clone().to(self.device)
                 _means.append(_mean + B.random.randn(torch.float32, *_mean.shape) * B.max(B.abs(_mean)))
                 _cov_perturbation = B.random.randn(torch.float32, *_covar.shape)
                 _covars.append(_covar + 0.2 * _cov_perturbation * B.transpose(_cov_perturbation)) ## make PSD for all random matrices
