@@ -28,6 +28,7 @@ class example_data_gen:
         xt: Target set inputs.
         yt: Target set outputs.
         '''
+
         self.num_batches = num_batches
         self.means = means
         self.covariances = covariances
@@ -48,6 +49,17 @@ class example_data_gen:
 
         with B.on_device(self.device):
 
+            ##NOTE: add noise to means and covariances so that they are different tasks for meta learning:
+            ##NOTE: new covariances must be PSD!
+            _means = []
+            _covars = []
+            for i, mean in enumerate(self.means):
+                _mean = torch.tensor(mean).clone().detach()
+                _covar = torch.tensor(self.covariances[i]).clone().detach()
+                _means.append(_mean + B.random.randn(torch.float32, *_mean.shape) * B.max(B.abs(_mean)))
+                _cov_perturbation = B.random.randn(torch.float32, *_covar.shape)
+                _covars.append(_covar + 0.2 * _cov_perturbation * B.transpose(_cov_perturbation)) ## make PSD for all random matrices
+
             def convert_data(points):
                 _xc, _yc, _xt, _yt = points
                 xc = B.transpose(_xc) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
@@ -58,7 +70,7 @@ class example_data_gen:
 
             epoch = []        
             for _ in range(self.num_batches):
-                _points = self.batch(self.means, self.covariances, self.dim_x, self.nc_bounds, self.nt_bounds, self.priors)
+                _points = self.batch(_means, _covars, self.dim_x, self.nc_bounds, self.nt_bounds, self.priors)
                 xc, yc, xt, yt = convert_data(_points)
 
                 batch = {
