@@ -1,3 +1,4 @@
+import shutup
 from sklearn.metrics import mean_poisson_deviance
 import neuralprocesses.torch as nps
 import torch
@@ -8,11 +9,9 @@ import numpy as np
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-# from classification_data_gens import example_data_gen
-# from classification_plotting import plot_classifier_1d, plot_classifier_2d
-from torch_classification_data_gens import example_data_gen
+from torch_classification_data_gens import example_data_gen, gp_cutoff
 from torch_classification_plotting import plot_classifier_1d, plot_classifier_2d
-
+shutup.please()
 
 class BernoulliDistribution(torch.nn.Module):
     def __init__(self, probs):
@@ -209,7 +208,7 @@ def main(config, _config):
     )
 
     # Tensors are always of the form `(b, c, n)`.
-    if config.data not in ['binary_MoG']:
+    if config.data not in ['binary_MoG', 'gp_cutoff']:
         print('Data generator has to be a classification one, defaulting to Binary MoG.')
         config.data = 'binary_MoG'
 
@@ -222,19 +221,31 @@ def main(config, _config):
     #     device=device,
     # )
 
-    means = [[-1, -1], [1, 1]]
-    covariances = [np.eye(2), np.eye(2)]
-    dim_x = config.dim_x
-    assert len(means[0]) == dim_x and np.array(covariances[0]).ndim == dim_x
-    priors = [0.5, 0.5]
-    assert sum(priors) == 1.
+    if config.data == 'binary_MoG':
+        means = [[-1] , [1]]
+        covariances = [[0.5], [0.5]]
+        dim_x = config.dim_x
+        assert np.array(means[0]).ndim == dim_x and np.array(covariances[0]).ndim == dim_x
+        priors = [0.5, 0.5]
+        assert sum(priors) == 1.
+        ## generated epochs from these are of shape (b, c, n)
+        gen_train, gen_cv, gens_eval = [    
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+            ]
 
-    ## generated epochs from these are of shape (b, c, n)
-    gen_train, gen_cv, gens_eval = [    
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
-        example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
-        ]
+    elif config.data == 'gp_cutoff':
+        xrange = [[-2]*config.dim_x, [2]*config.dim_x]
+        means, covariances, priors = None, None, None ## don't use these in plotting
+        gen_train, gen_cv, gens_eval = [    
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
+            ]
+
+    else:
+        pass
 
     objective = partial(
             nps.elbo,
@@ -268,7 +279,7 @@ def main(config, _config):
             if config.dim_x == 1:
                 plot_classifier_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
             elif config.dim_x == 2:
-                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, priors=priors, device=device)
+                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
 
         with out.Section('ELBO'):
             # for gen_name, gen in gens_eval():
@@ -336,7 +347,7 @@ def main(config, _config):
                 if config.dim_x == 1:
                     plot_classifier_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
                 elif config.dim_x == 2:
-                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, priors=priors, device=device)
+                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device)
 
 
 if __name__ == '__main__':
@@ -360,14 +371,14 @@ if __name__ == '__main__':
         "likelihood": 'bernoulli',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": '_IGNORE_ConvCorrBNP',
+        "model": 'ConvCorrBNP',
         "dim_x": 2,
         "dim_y": 1, ##NOTE: Has to be the case for binary classification
-        "dim_lv": 1,
-        "data": 'binary_MoG',   ##NOTE: Not yet implemented
+        "dim_lv": 16,
+        "data": 'gp_cutoff',   ##NOTE: Not yet implemented
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 1,
+        "epochs": 30,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
@@ -380,7 +391,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "fix_noise": True, ##NOTE: Not implemented
-        "num_batches": 1,
+        "num_batches": 16,
         "discretisation": 16,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
@@ -396,8 +407,6 @@ if __name__ == '__main__':
 
 
 ##TODO:
-## 2.a. Build visualisation for 2d data
-## 2.b. build way of seeing classification accuracy for any dim_x data
 ## *low priority* 3. Finish building full data generator (need?)
 
 ##NOTE: long term TODO

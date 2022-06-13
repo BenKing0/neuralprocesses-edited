@@ -1,6 +1,8 @@
 import lab as B
 import torch
 import random
+import numpy as np
+from statistics import median
 
 
 class example_data_gen:
@@ -110,3 +112,103 @@ class example_data_gen:
         xt, yt = list(zip(*targets))
 
         return B.stack(*xc, axis=0), B.stack(*yc, axis=0), B.stack(*xt, axis=0), B.stack(*yt, axis=0) ## of form (n, c)
+
+
+class gp_cutoff:
+    '''
+    A binary classifier with flexible distributions of points across each class' domain.
+    Constructed by slicing a GP at a set distance from the extrema and only keeping points outside of it.
+
+    Arguments:
+    ----------------
+    dim_x: (int) Dimension of inputs.
+    xrange: (list[list, list]) Range for drawing of samples for domain. Of form [min_array, max_array] where min/max_array are dim_x dimensional lists.
+    ...
+    '''
+    
+    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff=None, device='cpu'):
+
+        self.dim_x = dim_x
+        self.xrange = xrange
+        self.num_batches = num_batches
+        self.kernel = kernel
+        self.cutoff = cutoff
+        self.nc_bounds = nc_bounds
+        self.nt_bounds = nt_bounds
+        self.device = device
+
+        l = 2
+        if kernel == 'eq': 
+            f = lambda x1, x2: B.exp(-l * np.dot((x1 - x2), (x1-x2)) / 2)
+        else: 
+            print(f'Have not implemented {kernel} kernel, defaulting to EQ')
+            f = lambda x1, x2: B.exp(-l * np.dot((x1 - x2), (x1-x2)) / 2)
+        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in x]
+
+
+    def _construct_gp_sample(self, xs, gram):
+        gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
+        return xs, gp_sample(xs)
+
+    
+    def _cutoff(self, xs, gp_sample, cutoff):
+        '''
+        Assign classes to xs based on whether ys are above or below the median value. Done if cutoff is None.
+        Or:
+        Cut-off the top and bottom 'cutoff' percent of points to be the classes and ignore the rest. NOTE: Not yet implemented.
+        '''
+
+        if not cutoff:
+            _med = median(gp_sample)
+            _sliced = list(map(lambda x,y: [x, float(y < _med)], xs, gp_sample))
+        else:
+            pass ##TODO: not yet implemented
+
+        xs, ys = list(zip(*_sliced))
+        return xs, ys
+
+
+    def batch(self, gram, cutoff, nc_bounds, nt_bounds, xrange, dim_x):
+
+        nc = random.randint(*nc_bounds)
+        nt = random.randint(*nt_bounds)
+
+        xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
+        xs, gp_sample = self._construct_gp_sample(xs, gram)
+        xs, ys = self._cutoff(xs, gp_sample, cutoff)
+
+        _zipped = list(zip(xs, ys))
+        random.shuffle(_zipped)
+        contexts, targets = _zipped[:nc], _zipped[nc:]
+
+        xc, yc = list(zip(*contexts))
+        xt, yt = list(zip(*targets))
+        return xc, yc, xt, yt
+
+
+    def epoch(self):
+
+        with B.on_device(self.device):
+
+            def convert_data(points):
+                _xc, _yc, _xt, _yt = points
+                xc = B.transpose(torch.tensor(_xc, dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
+                xt = B.transpose(torch.tensor(_xt, dtype=torch.float32))
+                yc = B.expand_dims(torch.tensor(_yc, dtype=torch.float32), axis=0)
+                yt = B.expand_dims(torch.tensor(_yt, dtype=torch.float32), axis=0)
+                return xc, yc, xt, yt
+
+            epoch = []        
+            for _ in range(self.num_batches):
+                _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
+                xc, yc, xt, yt = convert_data(_points)
+
+                batch = {
+                    'xc': xc.to(self.device),
+                    'yc': yc.to(self.device),
+                    'xt': xt.to(self.device),
+                    'yt': yt.to(self.device),
+                }
+                epoch.append(batch)
+
+            return epoch   

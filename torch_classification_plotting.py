@@ -34,7 +34,7 @@ def _group_classes(inputs, outputs, grouper):
 
     
 ##NOTE: only defined for binary classification
-def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = [0.5, 0.5], device='cpu'):
+def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prior: list = [0.5, 0.5], device='cpu'):
 
     with B.on_device(device):
 
@@ -67,9 +67,10 @@ def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = 
         plt.scatter(batch['xt'], batch['yt'], marker='.', c='k', label='Targets')
         cs = ['xkcd:light red', 'xkcd:light blue']
         for class_, group in groups:
-            plt.plot(group.x, group.y, '+', color=cs[class_], label=f'{class_} predicted')
+            plt.plot(group.x, group.y, '+', color=cs[int(class_)], label=f'{class_} predicted')
         plt.plot(B.to_numpy(B.squeeze(smooth_xs)), B.to_numpy(smooth_preds), '-', color='xkcd:green', label='Smoothed')
-        plt.plot(B.to_numpy(B.squeeze(smooth_xs)), true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars), 'k-', label='Truth')
+        if means and vars:
+            plt.plot(B.to_numpy(B.squeeze(smooth_xs)), true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars), 'k-', label='Truth')
         plt.ylim(-0.1, 1.1)
         plt.ylabel('Posterior Prob. of Class 1')
         plt.xlabel('x')
@@ -79,7 +80,7 @@ def plot_classifier_1d(state, model, gen, save_path, means, vars, prior: list = 
 
 
 ##NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
-def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_class: int = 0, device='cpu'):
+def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device='cpu'):
     '''
     Plot 2D xs belonging to 1 of K classes. Therefore dim_x = 2, dim_y = K.
 
@@ -120,7 +121,7 @@ def plot_classifier_2d(state, model, gen, save_path, means, vars, priors, hmap_c
         sns.set_theme()
         plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4, shading='auto')   
         plt.colorbar()
-        markers = itertools.cycle(('x', '+', '.', 'o', '*'))
+        markers = itertools.cycle(('x', 'o', '.', '+', '*'))
         for class_, _ in groups:
             x = x_dict[class_]
             plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
