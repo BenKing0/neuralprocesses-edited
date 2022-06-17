@@ -157,10 +157,10 @@ def run(config):
         wd.file(f"model-last-convnp.torch"),
     )
 
-    return vals_corr, vals_corr_cv, vals, vals_cv
+    return vals_corr, vals_corr_cv, vals, vals_cv, wd
 
 
-def plot(vals_corr, vals_corr_cv, vals, vals_cv):
+def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd):
     sns.set_theme()
     xs = np.arange(2*config.epochs)
 
@@ -178,13 +178,14 @@ def plot(vals_corr, vals_corr_cv, vals, vals_cv):
     plt.plot(np.ones(100)*len(linear_means)//2, np.linspace(min(linear_means), max(linear_means), 100), 'k--', alpha=0.4)
     plt.xlabel('Epochs')
     plt.ylabel('Negative Log Likelihood')
-    plt.show()
+    plt.savefig(wd.file()+f"/CorrChange.png")
+    plt.close()
 
 
 if __name__ == '__main__':
 
     _config = {
-        'root': ['C:/Users/bened/Documents/University/Cambridge/Thesis/ssh_transferred_experiments/_experiments'],
+        'root': ['_experiments'],
         'dim_x': 1,
         'dim_y': 1,
         'dim_yc': (1,) * 1,
@@ -211,6 +212,6 @@ if __name__ == '__main__':
         }
     config = dotdict(_config)
 
-    vals_corr, vals = run(config)
+    vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)
 
-    plot(vals_corr, vals)
+    plot(vals_corr, vals_corr_cv, vals, vals_cv, wd)
