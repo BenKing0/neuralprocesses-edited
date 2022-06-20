@@ -74,23 +74,6 @@ def build_corrconvnp(config):
     return model
 
 
-def _encoder_diag_transform(dist):
-    '''
-    This returns a function where, when called, turns a non-diagonal covariance distribution into a diagonal covariance distribution.
-
-    Args:
-    --------
-    dist: A non-diagonal MultiOutputNormal distribution 
-    '''
-
-    mean = dist._mean
-    var = matrix.Diagonal(B.diag(dist._var))
-    noise = dist._noise
-    shape = dist.shape
-
-    return nps.MultiOutputNormal(mean, var, noise, shape) ## takes in 'dist' and must return a diagonal 'MultiOutputNormal' object as output 'dist'
-
-
 def build_convnp(config):
     ##NOTE: the reason for this is because the 'het' lieklihood has a different number of channels to the 'lowrank' for the same shape covariance.
     ## Therefore, build 'lowrank' again and then force to be diagonal.
@@ -98,7 +81,7 @@ def build_convnp(config):
     model = nps.Model(
         nps.Chain(
             corrconvnp.encoder,
-            _encoder_diag_transform,
+            lambda dist: nps.MultiOutputNormal(dist._mean, matrix.Diagonal(B.diag(dist._var)), dist._noise, dist.shape),
         ),
         corrconvnp.decoder,
     )
