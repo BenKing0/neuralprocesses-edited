@@ -185,13 +185,13 @@ def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd):
     sns.set_theme()
     xs = np.arange(2*config.epochs)
 
-    linear_means = -np.array([vals_corr[0], vals[0]]).flatten()
-    linear_vars = np.array([vals_corr[1], vals[1]]).flatten()
+    linear_means = -np.array([np.array(vals_corr)[:,0], np.array(vals)[:,0]]).flatten()
+    linear_vars = np.array([np.array(vals_corr)[:,1], np.array(vals)[:,1]]).flatten()
     plt.plot(xs, linear_means, 'xkcd:royal blue')
     plt.fill_between(xs, linear_means - linear_vars, linear_means + linear_vars, color='xkcd:royal blue', alpha=0.4)
 
-    cv_linear_means = -np.array([vals_corr_cv[0], vals_cv[0]]).flatten()
-    cv_linear_vars = np.array([vals_corr_cv[1], vals_cv[1]]).flatten()
+    cv_linear_means = -np.array([np.array(vals_corr_cv)[:,0], np.array(vals_cv)[:,0]]).flatten()
+    cv_linear_vars = np.array([np.array(vals_corr_cv)[:,1], np.array(vals_cv)[:,1]]).flatten()
     plt.plot(xs, cv_linear_means, 'xkcd:red')
     plt.fill_between(xs, cv_linear_means - cv_linear_vars, cv_linear_means + cv_linear_vars, color='xkcd:red', alpha=0.4)
 
