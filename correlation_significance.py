@@ -127,6 +127,7 @@ def run(config):
     )
 
     B.epsilon = 1e-2
+    # _keep_keys = dict()
 
     model = build_corrconvnp(config)
     model = model.to(device)
@@ -135,18 +136,50 @@ def run(config):
         with out.Section(f"Epoch {i + 1}"):
             _, vals_corr = train(state, model, opt, objective, data_generator)
             _, vals_corr_cv = eval(state, model, objective, data_generator)
+
     torch.save(
         {
-            "weights": model.state_dict(),
+        'weights': model.encoder.state_dict(), ## save only encoder part 
         },
-        wd.file(f"model-last-corrconvnp.torch"),
+        wd.file(f"model-last-corrconvnp-encoder.torch"),
     )
+    torch.save(
+        {
+        'weights': model.decoder.state_dict(), ## save only encoder part 
+        },
+        wd.file(f"model-last-corrconvnp-encoder.torch"),
+    )
+
+    # for key, value in model.state_dict().items():
+    #     _keep_keys[key] = value
+
+    # torch.save(
+    #     {
+    #         "weights": model.state_dict(),
+    #     },
+    #     wd.file(f"model-last-corrconvnp.torch"),
+    # )
 
     model = build_convnp(config)
     model = model.to(device)
-    model.load_state_dict(
-        torch.load(wd.file("model-last-corrconv.torch"), map_location=device)["weights"]
+
+    model.encoder[0].load_state_dict(
+        torch.load(wd.file("model-last-corrconvnp-encoder.torch"), map_location=device)["weights"]
     )
+    model.decoder.load_state_dict(
+        torch.load(wd.file("model-last-corrconvnp-decoder.torch"), map_location=device)["weights"]
+    )
+
+    # i = 0
+    # for og_key, _ in _keep_keys.items():
+    #     _unused_key = list(model.state_dict().keys())[i]
+    #     model.state_dict[og_key] = model.state_dict().pop(model.state_dict()[_unused_key])
+    #     i += 1
+
+    # model.load_state_dict(
+    #     torch.load(wd.file("model-last-corrconvnp.torch"), map_location=device)["weights"]
+    # )
+
     opt = torch.optim.Adam(model.parameters(), config.rate)
     for i in range(config.epochs, 2 * config.epochs):
         with out.Section(f"Epoch {i + 1}"):
@@ -198,7 +231,7 @@ if __name__ == '__main__':
         'objective': 'elbo', ## HC
         'mode': '_train', ## HC 
         'data': 'eq',    
-        'batch_size': 1,
+        'batch_size': 16,
         'train_test': True,    
         'rate': 3e-4,
         'num_samples': 20,
