@@ -187,18 +187,19 @@ def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd):
 
     linear_means = -np.array([np.array(vals_corr)[:,0], np.array(vals)[:,0]]).flatten()
     linear_vars = np.array([np.array(vals_corr)[:,1], np.array(vals)[:,1]]).flatten()
-    plt.plot(xs, linear_means, 'xkcd:royal blue')
-    plt.fill_between(xs, linear_means - linear_vars, linear_means + linear_vars, color='xkcd:royal blue', alpha=0.4)
+    plt.plot(xs + 1, linear_means, 'xkcd:royal blue', label='Training')
+    plt.fill_between(xs + 1, linear_means - linear_vars, linear_means + linear_vars, color='xkcd:royal blue', alpha=0.4)
 
     cv_linear_means = -np.array([np.array(vals_corr_cv)[:,0], np.array(vals_cv)[:,0]]).flatten()
     cv_linear_vars = np.array([np.array(vals_corr_cv)[:,1], np.array(vals_cv)[:,1]]).flatten()
-    plt.plot(xs, cv_linear_means, 'xkcd:red')
-    plt.fill_between(xs, cv_linear_means - cv_linear_vars, cv_linear_means + cv_linear_vars, color='xkcd:red', alpha=0.4)
+    plt.plot(xs + 1, cv_linear_means, 'xkcd:red', label='Validation')
+    plt.fill_between(xs + 1, cv_linear_means - cv_linear_vars, cv_linear_means + cv_linear_vars, color='xkcd:red', alpha=0.4)
 
     plt.title('Training loss with epochs')
     plt.plot(np.ones(100)*len(linear_means)//2, np.linspace(min(linear_means), max(linear_means), 100), 'k--', alpha=0.4)
     plt.xlabel('Epochs')
     plt.ylabel('Negative Log Likelihood')
+    plt.legend()
     plt.savefig(wd.file()+f"/CorrChange.png")
     plt.close()
 
