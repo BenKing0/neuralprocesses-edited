@@ -96,7 +96,7 @@ def run(config):
         *config.root,
         config.data,
         *((f"x{config.dim_x}_y{config.dim_y}",) if hasattr(config, "dim_x") else ()),
-        'CorrelationSignificance',
+        'CorrelationSignificance' if not config.corrconv_only else 'CorrConvOnly',
         *((config.arch,) if hasattr(config, "arch") else ()),
         config.objective,
         log=f"log{config.mode}.txt",
@@ -117,7 +117,7 @@ def run(config):
             normalise=True,
         )
 
-    data_generator, _, _ = exp.data[config.data]["setup"](
+    data_generator, _, eval_generator = exp.data[config.data]["setup"](
         config,
         config,
         num_tasks_train=2**9 if config.train_test else 2**14,
@@ -128,60 +128,102 @@ def run(config):
 
     B.epsilon = 1e-2
 
-    model = build_corrconvnp(config)
-    model = model.to(device)
-    opt = torch.optim.Adam(model.parameters(), config.rate)
-    vals_corr, vals_corr_cv = [], []
-    for i in range(0, config.epochs):
-        with out.Section(f"Epoch {i + 1}"):
-            _, _val_corr = train(state, model, opt, objective, data_generator)
-            _, _val_corr_cv = eval(state, model, objective, data_generator)
-            vals_corr.append(_val_corr)
-            vals_corr_cv.append(_val_corr_cv)
+    if config.mode == '_train':
+            
+        model = build_corrconvnp(config)
+        model = model.to(device)
 
-    torch.save(
-        {
-        'weights': model.encoder.state_dict(), ## save only encoder part 
-        },
-        wd.file(f"model-last-corrconvnp-encoder.torch"),
-    )
-    torch.save(
-        {
-        'weights': model.decoder.state_dict(), ## save only encoder part 
-        },
-        wd.file(f"model-last-corrconvnp-decoder.torch"),
-    )
+        opt = torch.optim.Adam(model.parameters(), config.rate)
+        vals_corr, vals_corr_cv = [], []
+        for i in range(0, config.epochs):
+            with out.Section(f"Epoch {i + 1}"):
+                _, _val_corr = train(state, model, opt, objective, data_generator)
+                _, _val_corr_cv = eval(state, model, objective, data_generator)
+                vals_corr.append(_val_corr)
+                vals_corr_cv.append(_val_corr_cv)
 
-    model = build_convnp(config)
-    model = model.to(device)
+        torch.save(
+            {
+            'weights': model.encoder.state_dict(), ## save only encoder part 
+            },
+            wd.file(f"model-last-corrconvnp-encoder.torch"),
+        )
+        torch.save(
+            {
+            'weights': model.decoder.state_dict(), ## save only encoder part 
+            },
+            wd.file(f"model-last-corrconvnp-decoder.torch"),
+        )
 
-    model.encoder[0].load_state_dict(
-        torch.load(wd.file("model-last-corrconvnp-encoder.torch"), map_location=device)["weights"]
-    )
-    model.decoder.load_state_dict(
-        torch.load(wd.file("model-last-corrconvnp-decoder.torch"), map_location=device)["weights"]
-    )
+        if not config.corrconv_only:
+            model = build_convnp(config)
+            model = model.to(device)
 
-    opt = torch.optim.Adam(model.parameters(), config.rate)
-    vals, vals_cv = [], []
-    for i in range(config.epochs, 2 * config.epochs):
-        with out.Section(f"Epoch {i + 1}"):
-            _, _val = train(state, model, opt, objective, data_generator)
-            _, _val_cv = eval(state, model, objective, data_generator)
-            vals.append(_val)
-            vals_cv.append(_val_cv)
+            model.encoder[0].load_state_dict(
+                torch.load(wd.file("model-last-corrconvnp-encoder.torch"), map_location=device)["weights"]
+            )
+            model.decoder.load_state_dict(
+                torch.load(wd.file("model-last-corrconvnp-decoder.torch"), map_location=device)["weights"]
+            )
 
-    torch.save(
-        {
-            "weights": model.state_dict(),
-        },
-        wd.file(f"model-last-convnp.torch"),
-    )
+            opt = torch.optim.Adam(model.parameters(), config.rate)
 
-    return vals_corr, vals_corr_cv, vals, vals_cv, wd
+        vals, vals_cv = [], []
+        for i in range(config.epochs, 2 * config.epochs):
+            with out.Section(f"Epoch {i + 1}"):
+                _, _val = train(state, model, opt, objective, data_generator)
+                _, _val_cv = eval(state, model, objective, data_generator)
+                vals.append(_val)
+                vals_cv.append(_val_cv)
+
+        if not config.corrconv_only:
+            torch.save(
+                {
+                    "weights": model.state_dict(),
+                },
+                wd.file(f"model-last-convnp.torch"),
+            )
+
+        return vals_corr, vals_corr_cv, vals, vals_cv, wd
+
+    elif config.mode == '_evaluate':
+
+        model = build_corrconvnp(config)
+        model = model.to(device)
+
+        eval_corr = []
+        with torch.no_grad():
+            for i in range(0, config.epochs):
+                with out.Section(f"Sample {i + 1}"):
+                    _, _eval_corr = eval(state, model, objective, data_generator)
+                    eval_corr.append(_eval_corr)
+
+        if not config.corrconv_only:
+            model = build_convnp(config)
+            model = model.to(device)
+
+            model.encoder[0].load_state_dict(
+                torch.load(wd.file("model-last-corrconvnp-encoder.torch"), map_location=device)["weights"]
+            )
+            model.decoder.load_state_dict(
+                torch.load(wd.file("model-last-corrconvnp-decoder.torch"), map_location=device)["weights"]
+            )
+
+        eval_ref = []
+        with torch.no_grad():
+            for i in range(config.epochs, 2 * config.epochs):
+                with out.Section(f"Sample {i + 1}"):
+                    _, _eval_ref = eval(state, model, objective, data_generator)
+                    eval_ref.append(_eval_ref)
+
+        return None, eval_corr, None, eval_ref, wd
+
+    else:
+        print('No mode specified (_train or _eval only).')
+        return None, None, None, None, wd
 
 
-def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd):
+def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd, i=None):
     sns.set_theme()
     xs = np.arange(2*config.epochs)
 
@@ -190,50 +232,94 @@ def plot(vals_corr, vals_corr_cv, vals, vals_cv, wd):
     plt.plot(xs + 1, linear_means, 'xkcd:royal blue', label='Training')
     plt.fill_between(xs + 1, linear_means - linear_vars, linear_means + linear_vars, color='xkcd:royal blue', alpha=0.4)
 
-    cv_linear_means = -np.array([np.array(vals_corr_cv)[:,0], np.array(vals_cv)[:,0]]).flatten()
-    cv_linear_vars = np.array([np.array(vals_corr_cv)[:,1], np.array(vals_cv)[:,1]]).flatten()
-    plt.plot(xs + 1, cv_linear_means, 'xkcd:red', label='Validation')
-    plt.fill_between(xs + 1, cv_linear_means - cv_linear_vars, cv_linear_means + cv_linear_vars, color='xkcd:red', alpha=0.4)
+    if vals_corr_cv and vals_cv:
+        cv_linear_means = -np.array([np.array(vals_corr_cv)[:,0], np.array(vals_cv)[:,0]]).flatten()
+        cv_linear_vars = np.array([np.array(vals_corr_cv)[:,1], np.array(vals_cv)[:,1]]).flatten()
+        plt.plot(xs + 1, cv_linear_means, 'xkcd:red', label='Validation')
+        plt.fill_between(xs + 1, cv_linear_means - cv_linear_vars, cv_linear_means + cv_linear_vars, color='xkcd:red', alpha=0.4)
 
     plt.title('Training loss with epochs')
     plt.plot(np.ones(100)*len(linear_means)//2, np.linspace(min(linear_means), max(linear_means), 100), 'k--', alpha=0.4)
     plt.xlabel('Epochs')
     plt.ylabel('Negative Log Likelihood')
     plt.legend()
-    plt.savefig(wd.file()+f"/CorrChange.png")
+    _run = f'{i+1}' if i else ''
+    plt.savefig(wd.file()+f"/CorrChange_{_run}.png") if not config.corrconv_only else plt.savefig(wd.file()+f"/CorrConvOnly_{_run}.png")
     plt.close()
 
 
 if __name__ == '__main__':
 
-    _config = {
-        'root': ['_experiments'],
-        'dim_x': 1,
-        'dim_y': 1,
-        'dim_yc': 1,
-        'dim_lv': 1, 
-        'dim_yt': 1,
-        'epochs': 10,
-        'arch': 'unet',
-        'objective': 'elbo', ## HC
-        'mode': '_train', ## HC 
-        'data': 'eq',    
-        'batch_size': 16,
-        'train_test': False,    
-        'rate': 3e-4,
-        'num_samples': 20,
-        "width": 256,
-        "dim_embedding": 256,
-        "num_heads": 8,
-        "num_layers": 6,
-        "unet_channels": (64, 64, 64, 128, 128, 128, 256),
-        "unet_kernels": 5,
-        "num_basis_functions": 512,
-        'fix_noise': True, 
-        "points_per_unit": 64,
-        }
-    config = dotdict(_config)
+    for i in range(9):
 
-    vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)
+        _config = {
+            'root': ['_experiments'],
+            'dim_x': 1,
+            'dim_y': 1,
+            'dim_yc': 1,
+            'dim_lv': 1, 
+            'dim_yt': 1,
+            'epochs': 10,
+            'corrconv_only': False,
+            'arch': 'unet',
+            'objective': 'elbo', ## HC
+            'mode': '_evaluate',
+            'data': 'eq',    
+            'batch_size': 16,
+            'train_test': False, 
+            'evaluate_fast': False,   
+            'rate': 3e-4,
+            'num_samples': 20,
+            "width": 256,
+            "dim_embedding": 256,
+            "num_heads": 8,
+            "num_layers": 6,
+            "unet_channels": (64, 64, 64, 128, 128, 128, 256),
+            "unet_kernels": 5,
+            "num_basis_functions": 512,
+            'fix_noise': True, 
+            "points_per_unit": 64,
+            }
+        config = dotdict(_config)
 
-    plot(vals_corr, vals_corr_cv, vals, vals_cv, wd)
+        vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)
+
+        if vals_corr and vals:
+            plot(vals_corr, vals_corr_cv, vals, vals_cv, wd)
+
+    for i in range(9):
+
+        _config = {
+            'root': ['_experiments'],
+            'dim_x': 1,
+            'dim_y': 1,
+            'dim_yc': 1,
+            'dim_lv': 1, 
+            'dim_yt': 1,
+            'epochs': 10,
+            'corrconv_only': True,
+            'arch': 'unet',
+            'objective': 'elbo', ## HC
+            'mode': '_evaluate',
+            'data': 'eq',    
+            'batch_size': 16,
+            'train_test': False, 
+            'evaluate_fast': False,   
+            'rate': 3e-4,
+            'num_samples': 20,
+            "width": 256,
+            "dim_embedding": 256,
+            "num_heads": 8,
+            "num_layers": 6,
+            "unet_channels": (64, 64, 64, 128, 128, 128, 256),
+            "unet_kernels": 5,
+            "num_basis_functions": 512,
+            'fix_noise': True, 
+            "points_per_unit": 64,
+            }
+        config = dotdict(_config)
+
+        vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)
+
+        if vals_corr and vals:
+            plot(vals_corr, vals_corr_cv, vals, vals_cv, wd)
