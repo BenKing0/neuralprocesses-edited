@@ -67,19 +67,21 @@ def construct_bernoulli_model(
 
     # CNN architecture:
     ##TODO: finish making dim_lv = 0 capable
+    decoder_channels = (32,) * 6
+    encoder_channels = (32,) * 6
     if dim_lv > 0:
         unet_latent_variable = nps.UNet(
             dim=dim_x,
             in_channels=2 * dim_y,
             out_channels=out_channels,    ## ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
-            channels=(32,) * 6,
+            channels=encoder_channels,
         )
         
         unet = nps.UNet(
             dim=dim_x,
             in_channels=dim_lv,
             out_channels=1 * dim_y, ## 1 per output dimension as Bernoulli has a single sufficient statistic
-            channels=(32,) * 6,
+            channels=decoder_channels,
         )
 
     else:
@@ -88,7 +90,7 @@ def construct_bernoulli_model(
             dim=dim_x,
             in_channels = sum(dim_yc) + len(dim_yc),
             out_channels=1 * dim_y, ## 1 per output dimension as Bernoulli has a single sufficient statistic
-            channels=(32,) * 6,
+            channels=decoder_channels,
         )
 
     # Discretisation of the functional embedding:
@@ -359,26 +361,19 @@ if __name__ == '__main__':
         __delattr__ = dict.__delitem__
 
     _config = {
-        ## below configs are hardcoded into model but included for reference
-        "width": 256,
-        "dim_embedding": 256,
-        "num_heads": 8,
-        "num_layers": 6,
-        "unet_channels": (64, 64, 64, 128, 128, 128, 256),
-        "dws_channels": 128,
-        "num_basis_functions": 64,
+        ## Model configs are hardcoded in 'construct_bernoulli_model' - change them there
         ## below are configs that do change the nature of the model/data/working directory
         "likelihood": 'bernoulli',
         "arch": 'unet',
         "objective": 'elbo',
         "model": 'ConvCorrBNP',
-        "dim_x": 2,
+        "dim_x": 1,
         "dim_y": 1, ##NOTE: Has to be the case for binary classification
-        "dim_lv": 16,
+        "dim_lv": 1,
         "data": 'gp_cutoff',   ##NOTE: Not yet implemented
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 30,
+        "epochs": 1,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
@@ -391,7 +386,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "fix_noise": True, ##NOTE: Not implemented
-        "num_batches": 16,
+        "num_batches": 1,
         "discretisation": 16,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }

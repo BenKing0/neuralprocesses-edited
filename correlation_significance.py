@@ -96,7 +96,7 @@ def run(config):
         *config.root,
         config.data,
         *((f"x{config.dim_x}_y{config.dim_y}",) if hasattr(config, "dim_x") else ()),
-        'CorrelationSignificance' if not config.corrconv_only else 'CorrConvOnly',
+        config.name,
         *((config.arch,) if hasattr(config, "arch") else ()),
         config.objective,
         log=f"log{config.mode}.txt",
@@ -263,7 +263,7 @@ if __name__ == '__main__':
             'corrconv_only': False,
             'arch': 'unet',
             'objective': 'elbo', ## HC
-            'mode': '_evaluate',
+            'mode': '_train',
             'data': 'eq',    
             'batch_size': 16,
             'train_test': False, 
@@ -280,6 +280,8 @@ if __name__ == '__main__':
             'fix_noise': True, 
             "points_per_unit": 64,
             }
+        config = dotdict(_config)
+        _config['name'] = f'CorrelationSignificance_{i}' if not config.corrconv_only else f'CorrConvOnly_{i}'
         config = dotdict(_config)
 
         vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)
@@ -300,7 +302,7 @@ if __name__ == '__main__':
             'corrconv_only': True,
             'arch': 'unet',
             'objective': 'elbo', ## HC
-            'mode': '_evaluate',
+            'mode': '_train',
             'data': 'eq',    
             'batch_size': 16,
             'train_test': False, 
@@ -317,6 +319,8 @@ if __name__ == '__main__':
             'fix_noise': True, 
             "points_per_unit": 64,
             }
+        config = dotdict(_config)
+        _config['name'] = f'CorrelationSignificance_{i}' if not config.corrconv_only else f'CorrConvOnly_{i}'
         config = dotdict(_config)
 
         vals_corr, vals_corr_cv, vals, vals_cv, wd = run(config)

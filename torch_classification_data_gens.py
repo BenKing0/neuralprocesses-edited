@@ -192,10 +192,10 @@ class gp_cutoff:
 
             def convert_data(points):
                 _xc, _yc, _xt, _yt = points
-                xc = B.transpose(torch.tensor(_xc, dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
-                xt = B.transpose(torch.tensor(_xt, dtype=torch.float32))
-                yc = B.expand_dims(torch.tensor(_yc, dtype=torch.float32), axis=0)
-                yt = B.expand_dims(torch.tensor(_yt, dtype=torch.float32), axis=0)
+                xc = B.transpose(torch.tensor(np.array(_xc), dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
+                xt = B.transpose(torch.tensor(np.array(_xt), dtype=torch.float32))
+                yc = B.expand_dims(torch.tensor(np.array(_yc), dtype=torch.float32), axis=0)
+                yt = B.expand_dims(torch.tensor(np.array(_yt), dtype=torch.float32), axis=0)
                 return xc, yc, xt, yt
 
             epoch = []        

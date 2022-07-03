@@ -58,7 +58,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
         groups = _group_classes(B.to_numpy(B.squeeze(batch['xt'])), B.to_numpy(rhos), B.to_numpy(membership))
 
         ## generate smooth prediction line for visualisation purposes
-        smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt']), B.max(*batch['xt']), 1000), axis=0)
+        smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt'].cpu()), B.max(*batch['xt'].cpu()), 1000), axis=0)
         _, smooth_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, smooth_xs))
         _smooth_preds = smooth_dist.probs
         smooth_preds = B.squeeze(_smooth_preds)
@@ -67,7 +67,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
         plt.scatter(batch['xt'], batch['yt'], marker='.', c='k', label='Targets')
         cs = ['xkcd:light red', 'xkcd:light blue']
         for class_, group in groups:
-            plt.plot(group.x, group.y, '+', color=cs[int(class_)], label=f'{class_} predicted')
+            plt.plot(group.x, group.y, '+', color=cs[int(class_)], label=f'{int(class_)} predicted')
         plt.plot(B.to_numpy(B.squeeze(smooth_xs)), B.to_numpy(smooth_preds), '-', color='xkcd:green', label='Smoothed')
         if means and vars:
             plt.plot(B.to_numpy(B.squeeze(smooth_xs)), true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars), 'k-', label='Truth')

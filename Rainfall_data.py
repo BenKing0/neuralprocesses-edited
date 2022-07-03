@@ -17,7 +17,7 @@ class rainfall_generator:
         batch_size, 
         nc_bounds: Tuple[int, int] = [50, 70],
         nt_bounds: Tuple[int, int] = [100, 140],
-        include_binary: bool = False,
+        include_binary: bool = True,
         device='cpu'
         ):
         self.batch_size = batch_size
@@ -94,7 +94,7 @@ class Bernoulli_Gamma_synthetic:
         l: float = 1.,
         gp_mean: float = 0.,
         num_ref_points: int = None,
-        include_binary: bool = False,
+        include_binary: bool = True,
         ):
 
         self.batch_size = batch_size
