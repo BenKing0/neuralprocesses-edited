@@ -560,11 +560,11 @@ if __name__ == '__main__':
         "type": "combined", ## NOTE: 'combined' is not yet operational
         "arch": 'convnet', ##NOTE: Hard-coded, included for filename
         "objective": 'elbo',
-        "model": 'synthetic',
+        "model": 'Rainfall',
         "dim_x": 2, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_y": 1, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_lv": 1,
-        "data": 'rainfall',
+        "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 1,
