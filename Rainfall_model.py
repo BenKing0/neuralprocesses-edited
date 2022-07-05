@@ -2,7 +2,6 @@ from neuralprocesses.torch import Parallel
 import shutup
 from sklearn.metrics import mean_poisson_deviance
 import neuralprocesses.torch as nps
-import neuralprocesses as base
 import torch
 import lab.torch as B
 import wbml.out as out
@@ -15,27 +14,13 @@ from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic
 from Rainfall_plotting import rainfall_plotter
 from scipy.special import gamma
 from typing import List
-from neuralprocesses.model.elbo import _merge_context_target
+from Rainfall_elbo import elbo
 shutup.please()
 
 
-# `Aggregate` outputs are assumed to always come with `AggregateInput` inputs.
-# In this case, that's not true, so add support for this.
-
-@_merge_context_target.dispatch
-def _merge_context_target(contexts: List, xt: B.Numeric, yt: base.Aggregate):
-    return _merge_context_target(
-        contexts,
-        nps.AggregateInput(*((xt, i) for i in range(len(yt)))),
-        yt,
-    )
-
-
-# NOTE: all functions built for passing in a single batch batch_size times each epoch
-
-
-class BernoulliDistribution:
+class BernoulliDistribution(torch.nn.Module):
     def __init__(self, probs):
+        super().__init__()
         self.probs = probs
 
     def logpdf(self, y):    
@@ -48,99 +33,132 @@ class BernoulliDistribution:
             return 0
 
 
-class GammaDistribution:
+class GammaDistribution(torch.nn.Module):
     def __init__(self, kappa, chi):
+        super.__init__()
         self.kappa = kappa
         self.chi = chi
 
     def logpdf(self, y):
         return B.sum(
-            (self.kappa - 1) * B.log(y) - (y / self.chi) - (B.log(gamma(self.kappa)) + self.kappa * B.log(self.chi)),
+            (self.kappa - 1) * B.log(y) - (y / self.chi),
             axis = -1,
-        )
+        ) - y.shape[-1] * (B.log(gamma(self.kappa)) + self.kappa * B.log(self.chi))
 
 
-class BernoulliGammaDist:
-    def __init__(self, z_bernoulli, z_gamma):
-        self.bernoulli_prob = B.sigmoid(z_bernoulli)[0, 0] 
-        self.z_gamma = B.softplus(z_gamma[0])
+class RainfallDistribution(torch.nn.Module):
+    def __init__(self, parallel_dists: Parallel):
+        super.__init__()
+        # These are distribution outputs from the parrallel decoder outputs.
+        self.bernoulli_dist = parallel_dists[0]
+        self.gamma_dist = parallel_dists[1]
 
-    def logpdf(self, ys):
+    def logpdf(self, y): # NOTE: y is 2d for each n now [(binary, extent), ... x n]
+        amount = []
+        binary, _ = y
+        for raining, extent in zip(*y):
+            if raining:
+                amount.append(extent)		
 
-        y_bernoulli, y_gamma = ys
-        y_bernoulli = y_bernoulli[0]
-        y_gamma = y_gamma[0]
-        bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
-
-        y_gamma_adjusted = []
-        z_gamma_adjusted = []
-        for i, [rain, amount] in enumerate(zip(y_bernoulli, y_gamma)):
-            if rain:
-                y_gamma_adjusted.append(amount)
-                z_gamma_adjusted.append(self.z_gamma[:, i].detach().numpy())
-
-        if y_gamma_adjusted:
-            y_gamma_adjusted = torch.tensor(np.array(y_gamma_adjusted), dtype=torch.float32)
-            z_gamma_adjusted = torch.tensor(np.array(z_gamma_adjusted), dtype=torch.float32)
-            gamma_dist = GammaDistribution(z_gamma_adjusted[:, 0], z_gamma_adjusted[:, 1])
-
-            return bernoulli_dist.logpdf(y_bernoulli) + gamma_dist.logpdf(y_gamma_adjusted)
-
-        else:
-            return bernoulli_dist.logpdf(y_bernoulli)
+        return self.bernoulli_dist.logpdf(binary) + self.gamma_dist.logpdf(amount)
 
 
+# TODO:
 class combined:
+
+    # TODO: can't do this as rho is a mix of > 0.5 and < 0.5 but pass an array to the distributions.
+    @classmethod
+    def _splitter(cls, decode_output: List[float]):
+        rho, kappa, chi = decode_output
+        if rho < 0.5:
+            return BernoulliDistribution(rho)
+        else:
+            return GammaDistribution(kappa, chi)
+
+    @classmethod
+    def _ouptput_activations(cls, z: List[float]):
+        return [B.sigmoid(z[0]), B.relu(z[1]), B.relu(z[2])]
 
     @classmethod
     def combined_model(
         cls,
+        dim_lv: int,
+        lv_likelihood: str,
+        discretisation: int,
         ):
+        dim_x = 2
+        dim_y = 3
 
-        model = nps.Model(
-            nps.FunctionalCoder(
-                nps.Discretisation(
-                    points_per_unit=32,
-                    multiple=1,
-                    margin=0.1,
-                ),
-                nps.Chain(
-                    nps.PrependDensityChannel(),
-                    nps.Parallel(
-                        nps.SetConv(scale=2 / 32),
-                        nps.SetConv(scale=2 / 32),
-                    ),
-                    nps.DivideByFirstChannel(),
-                    nps.Concatenate(),
-                    nps.ConvNet(
-                        dim=2,
-                        in_channels=4,
-                        out_channels=4 * (2 + 64),
-                        channels=32,
-                        num_layers=6,
-                        points_per_unit=32,
-                        receptive_field=4,
-                        separable=True,
-                    ),
-                    nps.LowRankGaussianLikelihood(64),
-                ),
-            ),
+        if dim_lv > 0:
+            if lv_likelihood == 'het':
+                encoder_likelihood = nps.HeterogeneousGaussianLikelihood()
+                out_channels = 2 * dim_lv
+            elif lv_likelihood == 'lowrank':
+                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
+                out_channels = (2 + 64) * dim_lv
+            else:
+                print(f'Non-implemented likelihood passed ({lv_likelihood} is not in "het" or "lowrank"), defaulting to "lowrank" for Correlated LV model.')
+                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
+                out_channels = (2 + 64) * dim_lv
+        else:
+            encoder_likelihood = nps.DeterministicLikelihood()
+            unet_latent_variable = lambda x: x
+
+
+        # CNN architecture:
+        ##TODO: finish making dim_lv = 0 capable
+        decoder_channels = (32,) * 6
+        encoder_channels = (32,) * 6
+        if dim_lv > 0:
+            unet_latent_variable = nps.UNet(
+                dim=dim_x,
+                in_channels=2,
+                out_channels=out_channels,    ## ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
+                channels=encoder_channels,
+            )
+            
+            unet = nps.UNet(
+                dim=dim_x,
+                in_channels=dim_lv,
+                out_channels=dim_y, ## 3 outputs per point as this is rho, kappa, gamma
+                channels=decoder_channels,
+            )
+
+        else:
+            dim_yc = convert(dim_y, tuple)
+            unet = nps.UNet(
+                dim=dim_x,
+                in_channels = sum(dim_yc) + len(dim_yc),
+                out_channels=dim_y, ## 3 outputs per point as this is rho, kappa, gamma
+                channels=decoder_channels,
+            )
+
+        # Discretisation of the functional embedding:
+        disc = nps.Discretisation(
+            points_per_unit=discretisation,
+            multiple=2**unet.num_halving_layers,
+            margin=0.1,
+            dim=dim_x,
+        )
+
+        # Create the encoder and decoder and construct the model.
+        encoder = nps.FunctionalCoder(
+            disc,
             nps.Chain(
-                nps.ConvNet(
-                    dim=2,
-                    in_channels=4,
-                    out_channels=3,
-                    channels=32,
-                    num_layers=6,
-                    points_per_unit=32,
-                    receptive_field=4,
-                    separable=True,
-                ),
-                nps.SetConv(scale=2 / 32),
-                nps.Splitter(1, 2),
-                lambda xs: BernoulliGammaDist(*xs),
+                nps.PrependDensityChannel(),
+                nps.SetConv(scale=1 / disc.points_per_unit),
+                nps.DivideByFirstChannel(),
+                unet_latent_variable,
+                encoder_likelihood,
             ),
         )
+        decoder = nps.Chain(
+            unet,
+            nps.SetConv(scale=1 / disc.points_per_unit),
+            lambda z: cls._ouptput_activations(z), 
+            lambda z: cls._splitter(z),
+        )
+        model = nps.Model(encoder, decoder)
 
         return model
 
@@ -339,17 +357,15 @@ def train(state, model, opt, objective, gen, *, epoch):
     vals = []
     for i, batch in enumerate(gen.epoch()):
         if i == 0: print('data gen device:', B.device(batch['xc']))
-        xc = batch['xc']
-        yc_bernoulli, yc_precip = batch['yc']
-        yt_bernoulli, yt_precip = batch['yt']
-        # all var (inc. ys) must be of shape (c, n) even if c = 1
-        yc_bernoulli, yc_precip, yt_bernoulli, yt_precip = yc_bernoulli.reshape(1, -1), yc_precip.reshape(1, -1), yt_bernoulli.reshape(1, -1), yt_precip.reshape(1, -1)
         state, obj = objective(
-                model,
-                [(xc, yc_bernoulli), (xc, yc_precip)],
-                batch["xt"],
-                nps.Aggregate(yt_bernoulli, yt_precip),
-            )
+            state,
+            model,
+            batch["xc"],
+            batch["yc"],
+            batch["xt"],
+            batch["yt"],
+            parallel_merge=RainfallDistribution,
+        )
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
         val = -B.mean(obj)
@@ -368,15 +384,15 @@ def eval(state, model, objective, gen):
     with torch.no_grad():
         vals = []
         for batch in gen.epoch():
-            xc = batch['xc']
-            yc_bernoulli, yc_precip = batch['yc']
-            yt_bernoulli, yt_precip = batch['yt']
             state, obj = objective(
+                state,
                 model,
-                [(xc, yc_bernoulli), (xc, yc_precip)],
+                batch["xc"],
+                batch["yc"],
                 batch["xt"],
-                nps.Aggregate(yt_bernoulli, yt_precip),
+                batch["yt"],
             )
+
             # Save numbers.
             n = nps.num_data(batch["xt"], batch["yt"])
             vals.append(B.to_numpy(obj))
@@ -402,12 +418,16 @@ def main(config, _config):
     batch_size = 16 
 
     if config.type == "combined":
-        model = combined.combined_model()
-               
+        model = combined.combined_model(
+            dim_lv = config.dim_lv,
+            lv_likelihood = config.lv_likelihood,
+            discretisation = config.discretisation,
+        )
+       
         gen_train, gen_cv, gens_eval = [    
-            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True, device=device),
-            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
-            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
+            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=False, device=device),
+            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=False,  device=device),
+            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=False,  device=device),
             ]
 
     elif config.type == 'separate':
@@ -443,16 +463,22 @@ def main(config, _config):
     )
 
     objective = partial(
-            nps.elbo,
+            elbo,
             num_samples=config.num_samples,
+            subsume_context=True,
+            normalise=True,
         )
     objective_cv = partial(
-            nps.elbo,
+            elbo,
             num_samples=config.num_samples,
+            subsume_context=False,  
+            normalise=True,
         )
     objective_eval = partial(
-            nps.elbo,
+            elbo,
             num_samples=5,
+            subsume_context=False,  
+            normalise=True,
         )
         
     ## In an evaluation regime only:
@@ -555,8 +581,8 @@ if __name__ == '__main__':
         __delattr__ = dict.__delitem__
 
     _config = {
-        "type": "combined", ## NOTE: 'combined' is not yet operational
-        "arch": 'convnet', ##NOTE: Hard-coded, included for filename
+        "type": "separate",
+        "arch": 'unet', ##NOTE: Hard-coded, included for filename
         "objective": 'elbo',
         "model": 'Rainfall',
         "dim_x": 2, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
