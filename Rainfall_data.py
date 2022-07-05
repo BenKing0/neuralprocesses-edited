@@ -24,7 +24,7 @@ class rainfall_generator:
         self.device = device
         self.include_binary = include_binary
 
-        self.folder = 'C:/Users/bened/Documents/University/Cambridge/Thesis/Data/NordicDailyPrecip/'
+        self.folder = 'data/'
         self.nc = random.randint(*nc_bounds)
         self.nt = random.randint(*nt_bounds)
         self.days = np.random.choice(np.arange(365), size=self.batch_size, replace=False)
