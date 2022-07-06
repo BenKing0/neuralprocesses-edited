@@ -1,4 +1,7 @@
+from ctypes import sizeof
+from neuralprocesses.disc import Discretisation
 from neuralprocesses.torch import Parallel
+from neuralprocesses.util import batch
 import shutup
 from sklearn.metrics import mean_poisson_deviance
 import neuralprocesses.torch as nps
@@ -16,8 +19,11 @@ from Rainfall_plotting import rainfall_plotter
 from scipy.special import gamma
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
+from sys import getsizeof
 shutup.please()
 
+
+# TODO: something is taking up a huge amount of memory (don't think its data as batch-size makes no difference)
 
 # `Aggregate` outputs are assumed to always come with `AggregateInput` inputs.
 # In this case, that's not true, so add support for this.
@@ -95,20 +101,21 @@ class combined:
     @classmethod
     def combined_model(
         cls,
+        discretisation,
         ):
 
         model = nps.Model(
             nps.FunctionalCoder(
                 nps.Discretisation(
-                    points_per_unit=32,
+                    points_per_unit=discretisation,
                     multiple=1,
                     margin=0.1,
                 ),
                 nps.Chain(
                     nps.PrependDensityChannel(),
                     nps.Parallel(
-                        nps.SetConv(scale=2 / 32),
-                        nps.SetConv(scale=2 / 32),
+                        nps.SetConv(scale=2 / discretisation),
+                        nps.SetConv(scale=2 / discretisation),
                     ),
                     nps.DivideByFirstChannel(),
                     nps.Concatenate(),
@@ -132,11 +139,11 @@ class combined:
                     out_channels=3,
                     channels=32,
                     num_layers=6,
-                    points_per_unit=32,
+                    points_per_unit=discretisation,
                     receptive_field=4,
                     separable=True,
                 ),
-                nps.SetConv(scale=2 / 32),
+                nps.SetConv(scale=2 / discretisation),
                 nps.Splitter(1, 2),
                 lambda xs: BernoulliGammaDist(*xs),
             ),
@@ -153,7 +160,7 @@ class separate:
         dim_x = 2, 
         dim_lv = 16,
         lv_likelihood = 'lowrank',
-        discretisation = 16,
+        discretisation = 1,
         ):
         """
         Bernoulli likelihood part of the model which decides whether it is raining or not (binary).
@@ -357,7 +364,7 @@ def train(state, model, opt, objective, gen, *, epoch):
         val.backward()
         opt.step()
     
-    ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
+    ## changed as outputs are 1d from decoder now. Takes 'vals' as a 1D numpy array:
     vals = np.array(vals)
     out.kv("Loglik (T)", exp.with_err(vals))
     return state, B.mean(vals)
@@ -399,7 +406,7 @@ def main(config, _config):
 
     nc_bounds = [50, 70]
     nt_bounds = [100, 140]
-    batch_size = 16 
+    batch_size = config.num_batches
 
     if config.data == 'rainfall':               
             gen_train, gen_cv, gens_eval = [    
@@ -578,7 +585,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "num_batches": 1,
-        "discretisation": 16,
+        "discretisation": 1,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
