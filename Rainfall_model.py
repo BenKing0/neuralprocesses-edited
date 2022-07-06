@@ -100,13 +100,15 @@ class combined:
         cls,
         discretisation,
         arch,
+        dim_lv,
+        num_layers,
+        encoder_num_channels,
+        decoder_num_channels,
         ):
 
         if arch == 'unet':
-            decoder_channels = (32,) * 6
-            encoder_channels = (32,) * 6
-            num_layers = 6
-            dim_lv = 16
+            decoder_channels = (encoder_num_channels,) * num_layers
+            encoder_channels = (decoder_num_channels,) * num_layers
 
             net_latent_variable = nps.UNet(
                 dim=2,
@@ -126,10 +128,8 @@ class combined:
 
         elif arch == 'convnet':
 
-            decoder_channels = 32
-            encoder_channels = 32
-            num_layers = 8
-            dim_lv = 16
+            decoder_channels = encoder_num_channels
+            encoder_channels = decoder_num_channels
 
             net_latent_variable = nps.ConvNet(
                 dim=2,
@@ -455,7 +455,12 @@ def main(config, _config):
             ]
 
     if config.type == "combined":
-        model = combined.combined_model(discretisation=1)
+        model = combined.combined_model(discretisation=1,
+        arch=config.arch, 
+        encoder_num_channels=64,
+        decoder_num_channels=64,
+        num_layers=8,
+        )
                
 
     elif config.type == 'separate':
@@ -463,7 +468,6 @@ def main(config, _config):
             dim_lv = config.dim_lv,
             lv_likelihood = config.lv_likelihood,
             discretisation = config.discretisation,
-            arch = config.arch,
         )
 
     model = model.to(device)
