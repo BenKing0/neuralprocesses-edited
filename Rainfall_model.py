@@ -42,14 +42,11 @@ def _merge_context_target(contexts: List, xt: B.Numeric, yt: base.Aggregate):
 
 class BernoulliDistribution:
     def __init__(self, probs):
-        self.probs = probs
+        self.probs = probs[:, 0] # (n, 1) to (n)
 
-    def logpdf(self, y):    
+    def logpdf(self, y):  
         if 0. not in self.probs and 1. not in self.probs:
-            return B.sum(
-                B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
-                axis=-1,
-            )
+            return B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y)
         else:
             return 0
 
@@ -60,40 +57,39 @@ class GammaDistribution:
         self.chi = chi
 
     def logpdf(self, y):
-        return B.sum(
-            (self.kappa - 1) * B.log(y) - (y / self.chi) - (B.log(gamma(self.kappa)) + self.kappa * B.log(self.chi)),
-            axis = -1,
-        )
+        return (self.kappa - 1) * B.log(y) - (y / self.chi) - (B.log(gamma(self.kappa)) + self.kappa * B.log(self.chi))
 
 
 class BernoulliGammaDist:
     def __init__(self, z_bernoulli, z_gamma):
-        self.bernoulli_prob = B.sigmoid(z_bernoulli)[0, 0] 
-        self.z_gamma = B.softplus(z_gamma[0])
+        self.bernoulli_prob = B.sigmoid(z_bernoulli)[0] # TODO: hack approach
+        # print(z_gamma.shape, z_bernoulli.shape) # TODO: why is this shape (20, 2, n) and (20, 1, n) respectively?
+        self.z_gamma = B.softplus(z_gamma)[0] # TODO: hack approach
 
     def logpdf(self, ys):
 
         y_bernoulli, y_gamma = ys
         y_bernoulli = y_bernoulli[0]
         y_gamma = y_gamma[0]
-        bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
+        bernoulli_dist = BernoulliDistribution(self.bernoulli_prob.reshape(-1, 1))
 
         y_gamma_adjusted = []
         z_gamma_adjusted = []
         for i, [rain, amount] in enumerate(zip(y_bernoulli, y_gamma)):
             if rain:
-                y_gamma_adjusted.append(amount)
-                z_gamma_adjusted.append(self.z_gamma[:, i].detach().numpy())
+                y_gamma_adjusted.append(amount.cpu().detach().numpy())
+                z_gamma_adjusted.append(self.z_gamma[:, i].cpu().detach().numpy())
 
         if y_gamma_adjusted:
             y_gamma_adjusted = torch.tensor(np.array(y_gamma_adjusted), dtype=torch.float32)
             z_gamma_adjusted = torch.tensor(np.array(z_gamma_adjusted), dtype=torch.float32)
             gamma_dist = GammaDistribution(z_gamma_adjusted[:, 0], z_gamma_adjusted[:, 1])
 
-            return bernoulli_dist.logpdf(y_bernoulli) + gamma_dist.logpdf(y_gamma_adjusted)
+            # print(bernoulli_dist.logpdf(y_bernoulli).shape, gamma_dist.logpdf(y_gamma_adjusted).shape) # (n), (n_reduced)
+            return (torch.sum(bernoulli_dist.logpdf(y_bernoulli)) + torch.sum(gamma_dist.logpdf(y_gamma_adjusted))).reshape(-1, 1)
 
         else:
-            return bernoulli_dist.logpdf(y_bernoulli)
+            return torch.sum(bernoulli_dist.logpdf(y_bernoulli)).reshape(-1, 1)
 
 
 class combined:
@@ -103,6 +99,24 @@ class combined:
         cls,
         discretisation,
         ):
+
+        decoder_channels = (32,) * 6
+        encoder_channels = (32,) * 6
+        dim_lv = 16
+
+        unet_latent_variable = nps.UNet(
+            dim=2,
+            in_channels=4,
+            out_channels=4 * (2 + 64),
+            channels=encoder_channels,
+        )
+        
+        unet = nps.UNet(
+            dim=2,
+            in_channels=dim_lv,
+            out_channels=3,
+            channels=decoder_channels,
+        )
 
         model = nps.Model(
             nps.FunctionalCoder(
@@ -119,30 +133,12 @@ class combined:
                     ),
                     nps.DivideByFirstChannel(),
                     nps.Concatenate(),
-                    nps.ConvNet(
-                        dim=2,
-                        in_channels=4,
-                        out_channels=4 * (2 + 64),
-                        channels=32,
-                        num_layers=6,
-                        points_per_unit=32,
-                        receptive_field=4,
-                        separable=True,
-                    ),
+                    unet_latent_variable,
                     nps.LowRankGaussianLikelihood(64),
                 ),
             ),
             nps.Chain(
-                nps.ConvNet(
-                    dim=2,
-                    in_channels=4,
-                    out_channels=3,
-                    channels=32,
-                    num_layers=6,
-                    points_per_unit=discretisation,
-                    receptive_field=4,
-                    separable=True,
-                ),
+                unet,
                 nps.SetConv(scale=2 / discretisation),
                 nps.Splitter(1, 2),
                 lambda xs: BernoulliGammaDist(*xs),
@@ -351,12 +347,13 @@ def train(state, model, opt, objective, gen, *, epoch):
         yt_bernoulli, yt_precip = batch['yt']
         # all var (inc. ys) must be of shape (c, n) even if c = 1
         yc_bernoulli, yc_precip, yt_bernoulli, yt_precip = yc_bernoulli.reshape(1, -1), yc_precip.reshape(1, -1), yt_bernoulli.reshape(1, -1), yt_precip.reshape(1, -1)
-        state, obj = objective(
+        obj = objective(
                 model,
                 [(xc, yc_bernoulli), (xc, yc_precip)],
                 batch["xt"],
                 nps.Aggregate(yt_bernoulli, yt_precip),
             )
+        obj = obj.reshape(1, -1)
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
         val = -B.mean(obj)
@@ -378,14 +375,15 @@ def eval(state, model, objective, gen):
             xc = batch['xc']
             yc_bernoulli, yc_precip = batch['yc']
             yt_bernoulli, yt_precip = batch['yt']
-            state, obj = objective(
+            # all var (inc. ys) must be of shape (c, n) even if c = 1
+            yc_bernoulli, yc_precip, yt_bernoulli, yt_precip = yc_bernoulli.reshape(1, -1), yc_precip.reshape(1, -1), yt_bernoulli.reshape(1, -1), yt_precip.reshape(1, -1)
+            obj = objective(
                 model,
                 [(xc, yc_bernoulli), (xc, yc_precip)],
                 batch["xt"],
                 nps.Aggregate(yt_bernoulli, yt_precip),
             )
             # Save numbers.
-            n = nps.num_data(batch["xt"], batch["yt"])
             vals.append(B.to_numpy(obj))
 
         ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
@@ -422,7 +420,7 @@ def main(config, _config):
             ]
 
     if config.type == "combined":
-        model = combined.combined_model()
+        model = combined.combined_model(discretisation=1)
                
 
     elif config.type == 'separate':
@@ -473,16 +471,16 @@ def main(config, _config):
             name = "model-best.torch"
         model.load_state_dict(torch.load(wd.file(name), map_location=device)["weights"])
 
-        rainfall_plotter(
-            state=state, 
-            model=model,
-            save_path=wd.file(f"evaluate-rainfall.png"),
-            generator=gens_eval, 
-            xbounds=[0, 60],
-            ybounds=[0, 60],
-            reference=True,
-            device=device,
-            )
+        # rainfall_plotter(
+        #     state=state, 
+        #     model=model,
+        #     save_path=wd.file(f"evaluate-rainfall.png"),
+        #     generator=gens_eval, 
+        #     xbounds=[0, 60],
+        #     ybounds=[0, 60],
+        #     reference=True,
+        #     device=device,
+        #     )
 
         with out.Section('ELBO'):
             state, _ = eval(state, model, objective_eval, gens_eval)
@@ -531,16 +529,16 @@ def main(config, _config):
                     wd.file(f"model-last.torch"),
                 )
 
-                rainfall_plotter(
-                    state=state, 
-                    model=model,
-                    save_path=wd.file(f"train-epoch-{i+1}-rainfall.png"),
-                    generator=gens_eval, 
-                    xbounds=[0, 60],
-                    ybounds=[0, 60],
-                    reference=True,
-                    device=device,
-                    )
+                # rainfall_plotter(
+                #     state=state, 
+                #     model=model,
+                #     save_path=wd.file(f"train-epoch-{i+1}-rainfall.png"),
+                #     generator=gens_eval, 
+                #     xbounds=[0, 60],
+                #     ybounds=[0, 60],
+                #     reference=True,
+                #     device=device,
+                #     )
 
                 if val > best_eval_lik:
                     out.out("New best model!")
@@ -565,7 +563,7 @@ if __name__ == '__main__':
 
     _config = {
         "type": "combined", ## NOTE: 'combined' is not yet operational
-        "arch": 'convnet', ##NOTE: Hard-coded, included for filename
+        "arch": 'unet', ##NOTE: Hard-coded, included for filename
         "objective": 'elbo',
         "model": 'Rainfall',
         "dim_x": 2, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
@@ -574,7 +572,7 @@ if __name__ == '__main__':
         "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 1,
+        "epochs": 10,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
@@ -584,8 +582,8 @@ if __name__ == '__main__':
         "num_samples": 20,   ##NOTE: What does num_samples mean for bernoulli?
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 1,
-        "discretisation": 1,
+        "num_batches": 16,
+        "discretisation": 2,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 

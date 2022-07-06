@@ -38,6 +38,7 @@ class GammaDistribution:
 
 class BernoulliGammaDist:
     def __init__(self, z_bernoulli, z_gamma):
+        print(z_bernoulli.shape, z_gamma.shape)
         self.bernoulli_prob = B.sigmoid(z_bernoulli)[0, 0] 
         self.z_gamma = B.softplus(z_gamma[0])
 
@@ -131,7 +132,7 @@ xt = B.randn(torch.float32, 2, 5)
 yt_precip = B.exp(B.randn(torch.float32, 1, 5))
 yt_bernoulli = B.cast(torch.float32, B.randn(torch.float32, 1, 5) > 0)
 
-print(xc.shape, yc_bernoulli.shape, yc_precip.shape)
+# print(xc.shape, yc_bernoulli.shape, yc_precip.shape)
 
 nps.elbo(
     model,

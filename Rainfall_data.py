@@ -6,6 +6,7 @@ import random
 from statistics import median
 from datetime import datetime, timedelta
 import pandas as pd
+from sys import getsizeof
 import shutup
 shutup.please()
 
