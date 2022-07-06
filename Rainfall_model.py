@@ -1,4 +1,5 @@
 from ctypes import sizeof
+import re
 from neuralprocesses.disc import Discretisation
 from neuralprocesses.torch import Parallel
 from neuralprocesses.util import batch
@@ -98,25 +99,59 @@ class combined:
     def combined_model(
         cls,
         discretisation,
+        arch,
         ):
 
-        decoder_channels = (32,) * 6
-        encoder_channels = (32,) * 6
-        dim_lv = 16
+        if arch == 'unet':
+            decoder_channels = (32,) * 6
+            encoder_channels = (32,) * 6
+            num_layers = 6
+            dim_lv = 16
 
-        unet_latent_variable = nps.UNet(
-            dim=2,
-            in_channels=4,
-            out_channels=4 * (2 + 64),
-            channels=encoder_channels,
-        )
-        
-        unet = nps.UNet(
-            dim=2,
-            in_channels=dim_lv,
-            out_channels=3,
-            channels=decoder_channels,
-        )
+            net_latent_variable = nps.UNet(
+                dim=2,
+                in_channels=4,
+                out_channels=dim_lv * (2 + 64),
+                channels=encoder_channels,
+                separable=True,
+            )
+            
+            net = nps.UNet(
+                dim=2,
+                in_channels=dim_lv,
+                out_channels=3,
+                channels=decoder_channels,
+                separable=True,
+            )
+
+        elif arch == 'convnet':
+
+            decoder_channels = 32
+            encoder_channels = 32
+            num_layers = 8
+            dim_lv = 16
+
+            net_latent_variable = nps.ConvNet(
+                dim=2,
+                in_channels=4,
+                out_channels=dim_lv * (2 + 64),
+                channels=encoder_channels,
+                separable=True,
+                num_layers=num_layers,
+                points_per_unit=discretisation,
+                receptive_field=4,
+            )
+            
+            net = nps.ConvNet(
+                dim=2,
+                in_channels=dim_lv,
+                out_channels=3,
+                channels=decoder_channels,
+                separable=True,
+                num_layers=num_layers,
+                points_per_unit=discretisation,
+                receptive_field=4,
+            )
 
         model = nps.Model(
             nps.FunctionalCoder(
@@ -133,12 +168,12 @@ class combined:
                     ),
                     nps.DivideByFirstChannel(),
                     nps.Concatenate(),
-                    unet_latent_variable,
+                    net_latent_variable,
                     nps.LowRankGaussianLikelihood(64),
                 ),
             ),
             nps.Chain(
-                unet,
+                net,
                 nps.SetConv(scale=2 / discretisation),
                 nps.Splitter(1, 2),
                 lambda xs: BernoulliGammaDist(*xs),
@@ -428,6 +463,7 @@ def main(config, _config):
             dim_lv = config.dim_lv,
             lv_likelihood = config.lv_likelihood,
             discretisation = config.discretisation,
+            arch = config.arch,
         )
 
     model = model.to(device)
@@ -562,8 +598,8 @@ if __name__ == '__main__':
         __delattr__ = dict.__delitem__
 
     _config = {
-        "type": "combined", ## NOTE: 'combined' is not yet operational
-        "arch": 'unet', ##NOTE: Hard-coded, included for filename
+        "type": "combined", ## NOTE: 'seperate' is not yet operational
+        "arch": 'convnet',
         "objective": 'elbo',
         "model": 'Rainfall',
         "dim_x": 2, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
@@ -583,7 +619,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "num_batches": 16,
-        "discretisation": 2,
+        "discretisation": 1,
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
