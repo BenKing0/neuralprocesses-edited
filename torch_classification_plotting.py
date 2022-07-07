@@ -34,7 +34,7 @@ def _group_classes(inputs, outputs, grouper):
 
     
 ##NOTE: only defined for binary classification
-def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prior: list = [0.5, 0.5], device='cpu'):
+def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prior: list = [0.5, 0.5], device='cpu', num_samples=25):
 
     with B.on_device(device):
 
@@ -59,9 +59,14 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
 
         ## generate smooth prediction line for visualisation purposes
         smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt'].cpu()), B.max(*batch['xt'].cpu()), 1000), axis=0)
-        _, smooth_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, smooth_xs))
-        _smooth_preds = smooth_dist.probs
-        smooth_preds = B.squeeze(_smooth_preds)
+        smooth_preds_multi = []
+        for _ in range(num_samples):
+            _, smooth_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, smooth_xs))
+            _smooth_preds = smooth_dist.probs
+            smooth_preds_i = B.squeeze(_smooth_preds)
+            smooth_preds_multi.append(smooth_preds_i)
+        smooth_preds = np.mean(smooth_preds_multi, axis=0)
+        smooth_preds_stddev = np.std(smooth_preds_multi, axis=0)
 
         sns.set_theme()
         plt.scatter(batch['xt'], batch['yt'], marker='.', c='k', label='Targets')
@@ -69,6 +74,12 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
         for class_, group in groups:
             plt.plot(group.x, group.y, '+', color=cs[int(class_)], label=f'{int(class_)} predicted')
         plt.plot(B.to_numpy(B.squeeze(smooth_xs)), B.to_numpy(smooth_preds), '-', color='xkcd:green', label='Smoothed')
+        plt.fill_between(
+            B.to_numpy(B.squeeze(smooth_xs)), 
+            B.to_numpy(smooth_preds)+1.96*B.to_numpy(smooth_preds_stddev), 
+            B.to_numpy(smooth_preds)-1.96*B.to_numpy(smooth_preds_stddev), 
+            alpha=0.4,
+            color='xkcd:green')
         if means and vars:
             plt.plot(B.to_numpy(B.squeeze(smooth_xs)), true_boundary(B.cast(np.float32, B.squeeze(smooth_xs)), means, vars), 'k-', label='Truth')
         plt.ylim(-0.1, 1.1)
@@ -80,7 +91,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
 
 
 ##NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
-def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device='cpu'):
+def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device='cpu', num_samples=25):
     '''
     Plot 2D xs belonging to 1 of K classes. Therefore dim_x = 2, dim_y = K.
 
@@ -109,17 +120,21 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
             true_memberships = B.argmax(batch['yt'], axis=0)
         x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(B.squeeze(true_memberships)))
 
-        _num = 150
-        _hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), _num)
-        _hmap_X = np.meshgrid(_hmap_x, _hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
-        hmap_X = np.array(_hmap_X).reshape((2, _num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
-        _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
-        _hmap_probs = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
-        hmap_probs = B.to_numpy(_hmap_probs).reshape((_num, _num))
+        num = 150
+        hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), num)
+        hmap_X = np.meshgrid(hmap_x, hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
+        hmap_X = np.array(hmap_X).reshape((2, num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
+        hmap_probs_multi = []
+        for _ in range(num_samples):
+            _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
+            hmap_probs_i = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
+            hmap_probs_multi.append(hmap_probs_i)
+        hmap_probs = np.mean(hmap_probs_multi, axis=0)
+        hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
         sns.set_theme()
         sns.set_theme()
-        plt.pcolormesh(_hmap_X[0], _hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4, shading='auto')   
+        plt.pcolormesh(hmap_X[0], hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4, shading='auto')   
         plt.colorbar()
         markers = itertools.cycle(('x', 'o', '.', '+', '*'))
         for class_, _ in groups:
@@ -132,7 +147,3 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
             plt.title(f'Colormap scaled by class {hmap_class}')
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.close()
-
-    ##TODO: 
-    # 1. add colors in plots to signify ground truth
-    # 2. fix hmap
