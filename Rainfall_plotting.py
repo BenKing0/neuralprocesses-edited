@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Tuple
 import numpy as np
+from tqdm import tqdm
 
 
 def rainfall_plotter(
@@ -37,38 +38,40 @@ def rainfall_plotter(
     with torch.no_grad():
         _, hmap_dist = model(
             state, 
-            xc=xc,
-            yc=batch['yc'],
-            xt=B.cast(torch.float32, hmap_X),
+            [(xc, yc_bernoulli), (xc, yc_precip)],
+            B.cast(torch.float32, hmap_X),
             )
-    hmap_bernoulli = B.to_numpy(hmap_dist.bernoulli_prob[0])
-    hmap_kappa, hmap_chi = hmap_dist.z_gamma # (num, ), (num, ) 
+    hmap_bernoulli = B.to_numpy(hmap_dist.bernoulli_prob[0, 0])
+    hmap_kappa, hmap_chi = hmap_dist.z_gamma[0] # (num, ), (num, ) 
 
     hmap_rain = np.zeros(len(hmap_bernoulli))
-    for i, (kappa_i, chi_i) in zip(hmap_kappa, hmap_chi):
-        sample_i = np.mean(np.random.gamma(shape=kappa_i, scale=chi_i, size=num_samples))
-        ind = np.where(hmap_bernoulli==1)[i]
-        hmap_rain[ind] = sample_i
+    for i, (kappa_i, chi_i, bern_i) in enumerate(zip(hmap_kappa, hmap_chi, hmap_bernoulli)):
+        if bern_i:
+            sample_i = np.mean(np.random.gamma(shape=kappa_i, scale=chi_i, size=num_samples))
+            hmap_rain[i] = sample_i
+        else:
+            hmap_rain[i] = 0
     hmap_rain = hmap_rain.reshape((num, num)) # (1, num ^ 2) for 1 output dimension and _num points: (1, num ^ 2) => (num ^ 2, ) when selecting hmap_class
 
     # Plot the Heatmap with generated precipitation predictions over gridded inputs, with or without the true precipitation next to it for comparison
     if reference:
         _, (ax1, ax2) = plt.subplots(1, 2, sharex = True, sharey = True, figsize = (5,10))
-        ax1.pcolormesh(hmap_X[0], hmap_X[1], hmap_rain, vmin = 0, cmap = 'Pastel2', alpha = 0.4, shading = 'auto')   
-        ax1.scatter(batch['xc'].to_numpy()[0], batch['xc'].to_numpy()[1], marker = 'o', color='k', label='Context Points')
-        ax1.scatter(batch['xt'].to_numpy()[0], batch['xt'].to_numpy()[1], marker = '+', color='k', label='Target Points')
-        ax1.colorbar()
+        plot1 = ax1.imshow(hmap_rain, cmap='Pastel2', alpha=0.5, vmin=0, vmax=np.max(B.to_numpy(batch['reference'])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
+        ax1.scatter(B.to_numpy(batch['xc'])[0], B.to_numpy(batch['xc'])[1], marker = 'o', color='k', label='Context Points', s=0.1)
+        # ax1.scatter(B.to_numpy(batch['xt'])[0], B.to_numpy(batch['xt'])[1], marker = '+', color='k', label='Target Points', s=0.1)
         ax1.set_title(f'Model Predicted Rainfall')
-        ax2.imshow(batch['reference'], alpha = 0.4)
-        ax2.set_cmap('Pastel2')
-        ax2.colorbar()
+        ax1.legend()
+        plot2 = ax2.imshow(batch['reference'], alpha = 0.5, cmap='Pastel2', vmin=0, vmax=np.max(B.to_numpy(batch['reference'])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
         ax2.set_title(f'True Rainfall')
+        plt.colorbar(plot1, ax=ax1, shrink=0.2)
+        plt.colorbar(plot2, ax=ax2, shrink=0.2)
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
         plt.close()
     else:
-        plt.pcolormesh(hmap_X[0], hmap_X[1], hmap_rain, vmin = 0, cmap = 'Pastel2', alpha = 0.4, shading = 'auto')   
+        plt.imshow(hmap_rain, cmap='Pastel2', alpha=0.5, vmin=0)
+        plt.scatter(B.to_numpy(batch['xc'])[0], B.to_numpy(batch['xc'])[1], marker = 'o', color='k', label='Context Points', s=0.1)
+        # plt.scatter(B.to_numpy(batch['xt'])[0], B.to_numpy(batch['xt'])[1], marker = '+', color='k', label='Target Points', s=0.1)
         plt.colorbar()
-        plt.scatter(batch['xc'].to_numpy()[0], batch['xc'].to_numpy()[1], marker = 'o', color='k', label='Context Points')
-        plt.scatter(batch['xt'].to_numpy()[0], batch['xt'].to_numpy()[1], marker = '+', color='k', label='Target Points')
+        plt.legend()
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
         plt.close()

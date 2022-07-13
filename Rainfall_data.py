@@ -164,10 +164,10 @@ class Bernoulli_Gamma_synthetic:
 
         batch = {
             # NOTE: use of .T on tensor depracated and will cause errors eventually.
-            'xc': torch.tensor(xc, dtype=torch.float32).T.to(self.device),
-            'yc': torch.tensor(yc, dtype=torch.float32).T.to(self.device),
-            'xt': torch.tensor(xt, dtype=torch.float32).T.to(self.device),
-            'yt': torch.tensor(yt, dtype=torch.float32).T.to(self.device),
+            'xc': torch.tensor(np.array(xc), dtype=torch.float32).T.to(self.device),
+            'yc': torch.tensor(np.array(yc), dtype=torch.float32).T.to(self.device),
+            'xt': torch.tensor(np.array(xt), dtype=torch.float32).T.to(self.device),
+            'yt': torch.tensor(np.array(yt), dtype=torch.float32).T.to(self.device),
             'reference': reference,
         }
         return batch
