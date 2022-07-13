@@ -47,7 +47,7 @@ def rainfall_plotter(
     hmap_rain = np.zeros(len(hmap_bernoulli))
     for i, (kappa_i, chi_i, bern_i) in enumerate(zip(hmap_kappa, hmap_chi, hmap_bernoulli)):
         if bern_i:
-            sample_i = np.mean(np.random.gamma(shape=kappa_i, scale=chi_i, size=num_samples))
+            sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=chi_i.detach().cpu().numpy(), size=num_samples))
             hmap_rain[i] = sample_i
         else:
             hmap_rain[i] = 0
