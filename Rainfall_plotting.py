@@ -44,9 +44,11 @@ def rainfall_plotter(
     hmap_bernoulli = B.to_numpy(hmap_dist.bernoulli_prob[0, 0])
     hmap_kappa, hmap_chi = hmap_dist.z_gamma[0] # (num, ), (num, ) 
 
+    # TODO: must be faster way to do this
     hmap_rain = np.zeros(len(hmap_bernoulli))
     for i, (kappa_i, chi_i, bern_i) in enumerate(zip(hmap_kappa, hmap_chi, hmap_bernoulli)):
-        if bern_i:
+        if bern_i > 0.5:
+            # TODO: should this be a mean over samples?
             sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=chi_i.detach().cpu().numpy(), size=num_samples))
             hmap_rain[i] = sample_i
         else:
@@ -60,7 +62,7 @@ def rainfall_plotter(
         ax1.scatter(B.to_numpy(batch['xc'])[0], B.to_numpy(batch['xc'])[1], marker = 'o', color='k', label='Context Points', s=0.1)
         # ax1.scatter(B.to_numpy(batch['xt'])[0], B.to_numpy(batch['xt'])[1], marker = '+', color='k', label='Target Points', s=0.1)
         ax1.set_title(f'Model Predicted Rainfall')
-        ax1.legend()
+        # ax1.legend()
         plot2 = ax2.imshow(batch['reference'], alpha = 0.5, cmap='Pastel2', vmin=0, vmax=np.max(B.to_numpy(batch['reference'])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
         ax2.set_title(f'True Rainfall')
         plt.colorbar(plot1, ax=ax1, shrink=0.2)
@@ -72,6 +74,6 @@ def rainfall_plotter(
         plt.scatter(B.to_numpy(batch['xc'])[0], B.to_numpy(batch['xc'])[1], marker = 'o', color='k', label='Context Points', s=0.1)
         # plt.scatter(B.to_numpy(batch['xt'])[0], B.to_numpy(batch['xt'])[1], marker = '+', color='k', label='Target Points', s=0.1)
         plt.colorbar()
-        plt.legend()
+        # plt.legend()
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
         plt.close()
