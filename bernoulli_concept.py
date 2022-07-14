@@ -376,7 +376,7 @@ if __name__ == '__main__':
         "fix_noise": True, # NOTE: Not implemented
         "num_batches": 16,
         "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
-        "nc_bounds": [40, 50],
+        "nc_bounds": [80, 100],
         "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
