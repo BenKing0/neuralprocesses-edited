@@ -18,18 +18,19 @@ class BernoulliDistribution(torch.nn.Module):
         super().__init__()
         self.probs = probs
 
-    def logpdf(self, y):    ## define a CLASSIFICATION probability for calculation of loglik in ELBO non lv part.
+    def logpdf(self, y): # define a CLASSIFICATION probability for calculation of loglik in ELBO non lv part.
+        print('yshape: ', y.shape)
         if 0. not in self.probs and 1. not in self.probs:
             return B.sum(
                 B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
                 axis=-1,
-            )   ## axis either -1 or (-2, -1)
+            )   # axis either -1 or (-2, -1)
         else:
             return 0
 
     def class_1_prob(self):
-        ## To access outside where likelihood defined in model building.
-        ## Or just use 'dist(=BernoulliLikelihood).probs'
+        # To access outside where likelihood defined in model building.
+        # Or just use 'dist(=BernoulliLikelihood).probs'
         return self.probs
 
 
@@ -154,6 +155,7 @@ def eval(state, model, objective, gen):
     with torch.no_grad():
         vals = []
         for batch in gen.epoch():
+            print(batch['yc'].shape)
             state, obj = objective(
                 state,
                 model,
@@ -214,15 +216,6 @@ def main(config, _config):
         print('Data generator has to be a classification one, defaulting to Binary MoG.')
         config.data = 'binary_MoG'
 
-    # gen_train, gen_cv, gens_eval = exp.data[config.data]["setup"](
-    #     config,
-    #     _config,
-    #     num_tasks_train=2**9 if config.train_test else 2**14,
-    #     num_tasks_cv=2**9 if config.train_test else 2**12,
-    #     num_tasks_eval=2**9 if config.evaluate_fast else 2**14,
-    #     device=device,
-    # )
-
     if config.data == 'binary_MoG':
         means = [[-1] , [1]]
         covariances = [[0.5], [0.5]]
@@ -238,12 +231,12 @@ def main(config, _config):
             ]
 
     elif config.data == 'gp_cutoff':
-        xrange = [[-2]*config.dim_x, [2]*config.dim_x]
+        xrange = [[0]*config.dim_x, [60]*config.dim_x]
         means, covariances, priors = None, None, None ## don't use these in plotting
         gen_train, gen_cv, gens_eval = [    
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
             ]
 
     else:
@@ -284,9 +277,6 @@ def main(config, _config):
                 plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
 
         with out.Section('ELBO'):
-            # for gen_name, gen in gens_eval():
-            #     with out.Section(gen_name.capitalize()):
-            #         state, _ = eval(state, model, objective_eval, gen)
             state, _ = eval(state, model, objective_eval, gens_eval)
 
 
@@ -368,26 +358,26 @@ if __name__ == '__main__':
         "objective": 'elbo',
         "model": 'ConvCorrBNP',
         "dim_x": 1,
-        "dim_y": 1, ##NOTE: Has to be the case for binary classification
-        "dim_lv": 1,
-        "data": 'gp_cutoff',   ##NOTE: Not yet implemented
+        "dim_y": 1, # NOTE: Has to be the case for binary classification
+        "dim_lv": 16,
+        "data": 'gp_cutoff',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 1,
+        "epochs": 30,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
-        "evaluate_fast": False, ##NOTE: Not implemented
+        "evaluate_fast": False, # NOTE: Not implemented
         "rate": 3e-4,
         "evaluate_last": False,
-        "evaluate_num_samples": 1024,   ##NOTE: What does num_samples mean for bernoulli?
-        "num_samples": 20,   ##NOTE: What does num_samples mean for bernoulli?
+        "evaluate_num_samples": 1024,
+        "num_samples": 20,
         "evaluate_last": False,
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "fix_noise": True, ##NOTE: Not implemented
-        "num_batches": 1,
-        "discretisation": 16,
+        "fix_noise": True, # NOTE: Not implemented
+        "num_batches": 16,
+        "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
@@ -399,10 +389,3 @@ if __name__ == '__main__':
     config = dict2dot(_config)
 
     main(config, _config)
-
-
-##TODO:
-## *low priority* 3. Finish building full data generator (need?)
-
-##NOTE: long term TODO
-## - compare overfitting (i.e. steepness of sigmoid produced) with output of neural network trained on same data and see if this meta learning neuralprocess approach is better

@@ -64,7 +64,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
             _, smooth_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, smooth_xs))
             _smooth_preds = smooth_dist.probs
             smooth_preds_i = B.squeeze(_smooth_preds)
-            smooth_preds_multi.append(smooth_preds_i)
+            smooth_preds_multi.append(smooth_preds_i.cpu().detach().numpy())
         smooth_preds = np.mean(smooth_preds_multi, axis=0)
         smooth_preds_stddev = np.std(smooth_preds_multi, axis=0)
 
@@ -128,13 +128,13 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         for _ in range(num_samples):
             _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
             hmap_probs_i = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
-            hmap_probs_multi.append(hmap_probs_i)
+            hmap_probs_multi.append(hmap_probs_i.cpu().detach().numpy())
         hmap_probs = np.mean(hmap_probs_multi, axis=0)
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
         sns.set_theme()
         sns.set_theme()
-        plt.pcolormesh(hmap_X[0], hmap_X[1], hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', alpha=0.4, shading='auto')   
+        plt.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)   
         plt.colorbar()
         markers = itertools.cycle(('x', 'o', '.', '+', '*'))
         for class_, _ in groups:

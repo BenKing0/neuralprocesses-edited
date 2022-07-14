@@ -126,7 +126,7 @@ class gp_cutoff:
     ...
     '''
     
-    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff=None, device='cpu'):
+    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff='median', device='cpu'):
 
         self.dim_x = dim_x
         self.xrange = xrange
@@ -152,17 +152,12 @@ class gp_cutoff:
 
     
     def _cutoff(self, xs, gp_sample, cutoff):
-        '''
-        Assign classes to xs based on whether ys are above or below the median value. Done if cutoff is None.
-        Or:
-        Cut-off the top and bottom 'cutoff' percent of points to be the classes and ignore the rest. NOTE: Not yet implemented.
-        '''
 
-        if not cutoff:
+        if cutoff == 'median':
             _med = median(gp_sample)
             _sliced = list(map(lambda x,y: [x, float(y < _med)], xs, gp_sample))
-        else:
-            pass ##TODO: not yet implemented
+        elif cutoff == 'zero':
+            _sliced = list(map(lambda x,y: [x, float(y < 0)], xs, gp_sample))
 
         xs, ys = list(zip(*_sliced))
         return xs, ys
