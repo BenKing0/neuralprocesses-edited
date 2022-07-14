@@ -19,7 +19,6 @@ class BernoulliDistribution(torch.nn.Module):
         self.probs = probs
 
     def logpdf(self, y): # define a CLASSIFICATION probability for calculation of loglik in ELBO non lv part.
-        print('yshape: ', y.shape)
         if 0. not in self.probs and 1. not in self.probs:
             return B.sum(
                 B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
@@ -155,7 +154,6 @@ def eval(state, model, objective, gen):
     with torch.no_grad():
         vals = []
         for batch in gen.epoch():
-            print(batch['yc'].shape)
             state, obj = objective(
                 state,
                 model,
