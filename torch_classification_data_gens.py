@@ -3,6 +3,7 @@ import torch
 import random
 import numpy as np
 from statistics import median
+from tqdm import tqdm
 
 
 class example_data_gen:
@@ -126,7 +127,7 @@ class gp_cutoff:
     ...
     '''
     
-    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff='median', device='cpu'):
+    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff='median', device='cpu', reference=False):
 
         self.dim_x = dim_x
         self.xrange = xrange
@@ -136,6 +137,7 @@ class gp_cutoff:
         self.nc_bounds = nc_bounds
         self.nt_bounds = nt_bounds
         self.device = device
+        self.reference = reference
 
         l = (B.max(np.array(xrange[1])) - B.min(np.array(xrange[0]))) / 2 # this should be reflective of xrange!
         if kernel == 'eq': 
@@ -143,17 +145,21 @@ class gp_cutoff:
         else: 
             print(f'Have not implemented {kernel} kernel, defaulting to EQ')
             f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
-        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in x]
+        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in tqdm(x)]
 
 
     def _construct_gp_sample(self, xs, ref_xs, gram):
 
-        concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
         gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
-        out = gp_sample(concatenated)
-        ys, ref_ys = out[:len(xs)], out[len(xs):]
 
-        return xs, ys, ref_ys
+        if self.reference:
+            concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
+            out = gp_sample(concatenated)
+            ys, ref_ys = out[:len(xs)], out[len(xs):]
+            return xs, ys, ref_ys
+        
+        else:
+            return xs, gp_sample(xs), None
 
     
     def _cutoff(self, xs, gp_sample, cutoff):
@@ -174,11 +180,12 @@ class gp_cutoff:
         nt = random.randint(*nt_bounds)
 
         xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
+
         ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 100)[:-1] for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
         xs, gp_sample, ref_sample = self._construct_gp_sample(xs, ref_xs, gram)
         xs, ys = self._cutoff(xs, gp_sample, cutoff)
         ref_xs, ref_ys = self._cutoff(ref_xs, ref_sample, cutoff)
-        ref = list(zip(ref_xs, ref_ys))
+        ref = list(zip(ref_xs, ref_ys)) if self.reference else None
 
         _zipped = list(zip(xs, ys))
         random.shuffle(_zipped)
@@ -211,7 +218,7 @@ class gp_cutoff:
                     'yc': yc.to(self.device),
                     'xt': xt.to(self.device),
                     'yt': yt.to(self.device),
-                    'reference': reference,
+                    'reference': reference if self.reference else None,
                 }
                 epoch.append(batch)
 

@@ -232,9 +232,9 @@ def main(config, _config):
         xrange = [[0]*config.dim_x, [60]*config.dim_x]
         means, covariances, priors = None, None, None ## don't use these in plotting
         gen_train, gen_cv, gens_eval = [    
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
 
     else:
@@ -381,6 +381,7 @@ if __name__ == '__main__':
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
+]
     if _config['evaluate']:
         _config.update(mode='_evaluate')
     else:
