@@ -622,18 +622,17 @@ if __name__ == '__main__':
         __delattr__ = dict.__delitem__
 
     _config = {
-        "type": "combined", ## NOTE: 'seperate' is not yet operational
+        "type": "combined", # NOTE: 'seperate' is not yet operational
         "arch": 'convnet',
         "objective": 'elbo',
         "model": 'Rainfall',
-        "dim_x": 2, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
-        "dim_y": 1, ##NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
-        "dim_lv": 1,
+        "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
+        "dim_y": 1, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
+        "dim_lv": 1, # TODO: is high LV dim detramental?
         "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 10,
-        "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
         "rate": 1e-3, # 3e-4,

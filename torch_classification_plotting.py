@@ -33,7 +33,7 @@ def _group_classes(inputs, outputs, grouper):
         return
 
     
-##NOTE: only defined for binary classification
+# NOTE: only defined for binary classification
 def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prior: list = [0.5, 0.5], device='cpu', num_samples=25):
 
     with B.on_device(device):
@@ -90,7 +90,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
         plt.close()
 
 
-##NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
+# NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
 def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device='cpu', num_samples=25):
     '''
     Plot 2D xs belonging to 1 of K classes. Therefore dim_x = 2, dim_y = K.
@@ -132,18 +132,24 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         hmap_probs = np.mean(hmap_probs_multi, axis=0)
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
+        _, ref_ys = list(zip(*batch['reference'])) # this is a list(zip(ref_xs, ref_ys))
+        ref_ys = np.array(ref_ys).reshape((100, 100)) # number of reference points hard-coded to 100
+
         sns.set_theme()
-        sns.set_theme()
-        plt.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)   
-        plt.colorbar()
+        _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
+        plot1 = ax1.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)  
+        plot2 = ax2.imshow(ref_ys, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)   
+        plt.colorbar(plot1, ax=ax1)
+        plt.colorbar(plot2, ax=ax2)
         markers = itertools.cycle(('x', 'o', '.', '+', '*'))
         for class_, _ in groups:
             x = x_dict[class_]
-            plt.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
-        plt.legend()
+            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
+        ax1.legend()
         if B.max(memberships) == 1:
-            plt.title('Colormap scaled by class 1')
+            ax1.set_title('Colormap scaled by class 1')
         else:
-            plt.title(f'Colormap scaled by class {hmap_class}')
+            ax1.set_title(f'Colormap scaled by class {hmap_class}')
+        ax2.set_title('Reference')
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
         plt.close()

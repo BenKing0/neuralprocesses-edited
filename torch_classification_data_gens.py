@@ -137,18 +137,23 @@ class gp_cutoff:
         self.nt_bounds = nt_bounds
         self.device = device
 
-        l = 2
+        l = (B.max(np.array(xrange[1])) - B.min(np.array(xrange[0]))) / 2 # this should be reflective of xrange!
         if kernel == 'eq': 
-            f = lambda x1, x2: B.exp(-l * np.dot((x1 - x2), (x1-x2)) / 2)
+            f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
         else: 
             print(f'Have not implemented {kernel} kernel, defaulting to EQ')
-            f = lambda x1, x2: B.exp(-l * np.dot((x1 - x2), (x1-x2)) / 2)
+            f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
         self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in x]
 
 
-    def _construct_gp_sample(self, xs, gram):
+    def _construct_gp_sample(self, xs, ref_xs, gram):
+
+        concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
         gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
-        return xs, gp_sample(xs)
+        out = gp_sample(concatenated)
+        ys, ref_ys = out[:len(xs)], out[len(xs):]
+
+        return xs, ys, ref_ys
 
     
     def _cutoff(self, xs, gp_sample, cutoff):
@@ -169,8 +174,11 @@ class gp_cutoff:
         nt = random.randint(*nt_bounds)
 
         xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
-        xs, gp_sample = self._construct_gp_sample(xs, gram)
+        ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 100)[:-1] for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
+        xs, gp_sample, ref_sample = self._construct_gp_sample(xs, ref_xs, gram)
         xs, ys = self._cutoff(xs, gp_sample, cutoff)
+        ref_xs, ref_ys = self._cutoff(ref_xs, ref_sample, cutoff)
+        ref = list(zip(ref_xs, ref_ys))
 
         _zipped = list(zip(xs, ys))
         random.shuffle(_zipped)
@@ -178,7 +186,7 @@ class gp_cutoff:
 
         xc, yc = list(zip(*contexts))
         xt, yt = list(zip(*targets))
-        return xc, yc, xt, yt
+        return xc, yc, xt, yt, ref
 
 
     def epoch(self):
@@ -186,23 +194,24 @@ class gp_cutoff:
         with B.on_device(self.device):
 
             def convert_data(points):
-                _xc, _yc, _xt, _yt = points
+                _xc, _yc, _xt, _yt, ref = points
                 xc = B.transpose(torch.tensor(np.array(_xc), dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
                 xt = B.transpose(torch.tensor(np.array(_xt), dtype=torch.float32))
                 yc = B.expand_dims(torch.tensor(np.array(_yc), dtype=torch.float32), axis=0)
                 yt = B.expand_dims(torch.tensor(np.array(_yt), dtype=torch.float32), axis=0)
-                return xc, yc, xt, yt
+                return xc, yc, xt, yt, ref
 
             epoch = []        
             for _ in range(self.num_batches):
                 _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
-                xc, yc, xt, yt = convert_data(_points)
+                xc, yc, xt, yt, reference = convert_data(_points)
 
                 batch = {
                     'xc': xc.to(self.device),
                     'yc': yc.to(self.device),
                     'xt': xt.to(self.device),
                     'yt': yt.to(self.device),
+                    'reference': reference,
                 }
                 epoch.append(batch)
 

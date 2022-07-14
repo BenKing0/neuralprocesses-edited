@@ -223,18 +223,18 @@ def main(config, _config):
         assert sum(priors) == 1.
         ## generated epochs from these are of shape (b, c, n)
         gen_train, gen_cv, gens_eval = [    
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             ]
 
     elif config.data == 'gp_cutoff':
         xrange = [[0]*config.dim_x, [60]*config.dim_x]
         means, covariances, priors = None, None, None ## don't use these in plotting
         gen_train, gen_cv, gens_eval = [    
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero'),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             ]
 
     else:
@@ -355,9 +355,9 @@ if __name__ == '__main__':
         "arch": 'unet',
         "objective": 'elbo',
         "model": 'ConvCorrBNP',
-        "dim_x": 1,
+        "dim_x": 2,
         "dim_y": 1, # NOTE: Has to be the case for binary classification
-        "dim_lv": 16,
+        "dim_lv": 2, # TODO: is a high LV dim detramental?
         "data": 'gp_cutoff',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
@@ -376,6 +376,8 @@ if __name__ == '__main__':
         "fix_noise": True, # NOTE: Not implemented
         "num_batches": 16,
         "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
+        "nc_bounds": [40, 50],
+        "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
