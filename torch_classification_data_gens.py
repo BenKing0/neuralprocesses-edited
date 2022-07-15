@@ -213,12 +213,13 @@ class gp_cutoff:
 
             epoch = []        
             for i in range(self.num_batches):
-                _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
                 
                 if i < 1: 
+                    _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
                     xc, yc, xt, yt, reference = convert_data(_points)
                 else:
                     self.reference = False
+                    _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
                     xc, yc, xt, yt, _ = convert_data(_points)
 
                 batch = {
