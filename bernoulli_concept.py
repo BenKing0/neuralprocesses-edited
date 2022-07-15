@@ -381,7 +381,6 @@ if __name__ == '__main__':
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
     }
 
-]
     if _config['evaluate']:
         _config.update(mode='_evaluate')
     else:

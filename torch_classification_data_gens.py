@@ -184,12 +184,16 @@ class gp_cutoff:
         ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 100)[:-1] for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
         xs, gp_sample, ref_sample = self._construct_gp_sample(xs, ref_xs, gram)
         xs, ys = self._cutoff(xs, gp_sample, cutoff)
-        ref_xs, ref_ys = self._cutoff(ref_xs, ref_sample, cutoff)
-        ref = list(zip(ref_xs, ref_ys)) if self.reference else None
 
-        _zipped = list(zip(xs, ys))
-        random.shuffle(_zipped)
-        contexts, targets = _zipped[:nc], _zipped[nc:]
+        if self.reference:
+            ref_xs, ref_ys = self._cutoff(ref_xs, ref_sample, cutoff)
+            ref = list(zip(ref_xs, ref_ys)) 
+        else:
+            ref = None
+
+        zipped = list(zip(xs, ys))
+        random.shuffle(zipped)
+        contexts, targets = zipped[:nc], zipped[nc:]
 
         xc, yc = list(zip(*contexts))
         xt, yt = list(zip(*targets))
@@ -218,7 +222,7 @@ class gp_cutoff:
                     'yc': yc.to(self.device),
                     'xt': xt.to(self.device),
                     'yt': yt.to(self.device),
-                    'reference': reference if self.reference else None,
+                    'reference': reference 
                 }
                 epoch.append(batch)
 
