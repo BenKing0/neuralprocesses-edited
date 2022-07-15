@@ -275,7 +275,7 @@ def main(config, _config):
                 plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
 
         with out.Section('ELBO'):
-            state, _ = eval(state, model, objective_eval, gens_eval)
+            state, _ = eval(state, model, objective_eval, gen_cv)
 
 
     ## In a training regime:

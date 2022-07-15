@@ -180,8 +180,7 @@ class gp_cutoff:
         nt = random.randint(*nt_bounds)
 
         xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
-
-        ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 100)[:-1] for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
+        ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 30)[:-1] for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
         xs, gp_sample, ref_sample = self._construct_gp_sample(xs, ref_xs, gram)
         xs, ys = self._cutoff(xs, gp_sample, cutoff)
 
@@ -213,9 +212,14 @@ class gp_cutoff:
                 return xc, yc, xt, yt, ref
 
             epoch = []        
-            for _ in range(self.num_batches):
+            for i in range(self.num_batches):
                 _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
-                xc, yc, xt, yt, reference = convert_data(_points)
+                
+                if i < 1: 
+                    xc, yc, xt, yt, reference = convert_data(_points)
+                else:
+                    self.reference = False
+                    xc, yc, xt, yt, _ = convert_data(_points)
 
                 batch = {
                     'xc': xc.to(self.device),

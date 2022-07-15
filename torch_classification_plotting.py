@@ -133,7 +133,7 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
         _, ref_ys = list(zip(*batch['reference'])) # this is a list(zip(ref_xs, ref_ys))
-        ref_ys = np.array(ref_ys).reshape((100, 100)) # number of reference points hard-coded to 100
+        ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
 
         sns.set_theme()
         _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
