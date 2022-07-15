@@ -90,7 +90,7 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
         plt.close()
 
 
-# NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have >2 classes
+# NOTE: can handle multinomial classification when 'yc', 'yt' from 'gen' have > 2 classes
 def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device='cpu', num_samples=25):
     '''
     Plot 2D xs belonging to 1 of K classes. Therefore dim_x = 2, dim_y = K.
@@ -110,7 +110,7 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
             state, dist = model(state, batch['xc'], batch['yc'], batch['xt']) 
             prob_vectors = dist.probs ## (k, n) for k classes and n target points
 
-        np_batch = B.to_numpy(batch)
+        np_batch = {key: B.to_numpy(value) for key, value in batch.items() if key != 'reference'}
         np_probs = B.to_numpy(prob_vectors)
         if batch['yt'].shape[0] == 1:
             memberships = B.cast(torch.int32, prob_vectors > 0.5)

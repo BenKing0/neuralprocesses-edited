@@ -225,7 +225,7 @@ def main(config, _config):
         gen_train, gen_cv, gens_eval = [    
             example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=1, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             ]
 
     elif config.data == 'gp_cutoff':
@@ -234,7 +234,7 @@ def main(config, _config):
         gen_train, gen_cv, gens_eval = [    
             gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
             gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
+            gp_cutoff(config.dim_x, xrange, num_batches=1, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
 
     else:
