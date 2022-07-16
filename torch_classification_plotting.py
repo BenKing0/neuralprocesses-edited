@@ -141,10 +141,10 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         plot2 = ax2.imshow(ref_ys, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)   
         plt.colorbar(plot1, ax=ax1)
         plt.colorbar(plot2, ax=ax2)
-        markers = itertools.cycle(('x', 'o', '.', '+', '*'))
+        markers = itertools.cycle(('x', '.', 'o', '+', '*'))
         for class_, _ in groups:
             x = x_dict[class_]
-            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True')
+            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True', size=0.5)
         ax1.legend()
         if B.max(memberships) == 1:
             ax1.set_title('Colormap scaled by class 1')

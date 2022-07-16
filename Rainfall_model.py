@@ -132,7 +132,7 @@ class combined:
                 in_channels=4,
                 out_channels=dim_lv * (2 + 64),
                 channels=encoder_channels,
-                separable=True,
+                separable=False,
             )
             
             net = nps.UNet(
@@ -140,7 +140,7 @@ class combined:
                 in_channels=dim_lv,
                 out_channels=3,
                 channels=decoder_channels,
-                separable=True,
+                separable=False,
             )
 
         elif arch == 'convnet':
@@ -153,7 +153,7 @@ class combined:
                 in_channels=4,
                 out_channels=dim_lv * (2 + 64),
                 channels=encoder_channels,
-                separable=True,
+                separable=False,
                 num_layers=num_layers,
                 points_per_unit=discretisation,
                 receptive_field=4,
@@ -164,7 +164,7 @@ class combined:
                 in_channels=dim_lv,
                 out_channels=3,
                 channels=decoder_channels,
-                separable=True,
+                separable=False,
                 num_layers=num_layers,
                 points_per_unit=discretisation,
                 receptive_field=4,
@@ -174,7 +174,7 @@ class combined:
             nps.FunctionalCoder(
                 nps.Discretisation(
                     points_per_unit=discretisation,
-                    multiple=1,
+                    multiple=2**net.num_halving_layers,
                     margin=0.1,
                 ),
                 nps.Chain(
@@ -191,7 +191,7 @@ class combined:
             ),
             nps.Chain(
                 net,
-                nps.SetConv(scale=2 / discretisation),
+                nps.SetConv(scale=1 / discretisation),
                 nps.Splitter(1, 2),
                 lambda xs: BernoulliGammaDist(*xs),
             ),
@@ -456,8 +456,8 @@ def main(config, _config):
     print('global device: ', B.ActiveDevice.active_name)
     print('model device: ', device)
 
-    nc_bounds = [50, 70]
-    nt_bounds = [100, 140]
+    nc_bounds = config.nc_bounds
+    nt_bounds = config.nt_bounds
     batch_size = config.num_batches
 
     if config.data == 'rainfall':               
@@ -632,10 +632,10 @@ if __name__ == '__main__':
         "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 10,
+        "epochs": 30,
         "train_test": None,
         "evaluate": False,
-        "rate": 1e-3, # 3e-4,
+        "rate": 3e-4,
         "evaluate_last": False,
         "evaluate_num_samples": 20,
         "num_samples": 20, 
@@ -643,10 +643,11 @@ if __name__ == '__main__':
         "plot_num_samples": 1,
         "num_batches": 16,
         "discretisation": 2,
-        "encoder_channels": 64,
+        "encoder_channels": 32,
         "decoder_channels": 32,
         "num_layers": 6,
-        "dim_lv": 16,
+        "nc_bounds": [80, 100],
+        "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points per epoch not implemented, instead gives number of points per batch (approx. 100) * num_batches points for all three cases
     }
 
