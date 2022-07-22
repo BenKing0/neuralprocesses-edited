@@ -1,5 +1,7 @@
 from ctypes import sizeof
 import re
+from neuralprocesses import aggregate
+from neuralprocesses.aggregate import Aggregate
 from neuralprocesses.disc import Discretisation
 from neuralprocesses.torch import Parallel
 from neuralprocesses.util import batch
@@ -21,6 +23,7 @@ from scipy.special import gamma
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
 from sys import getsizeof
+import pandas as pd
 shutup.please()
 
 
@@ -36,35 +39,35 @@ def _merge_context_target(contexts: List, xt: B.Numeric, yt: base.Aggregate):
     )
 
 
-# NOTE: all functions built for passing in a single batch batch_size times each epoch
-
-
 class BernoulliDistribution:
 
     def __init__(self, probs):
-        self.probs = probs[0, :] # (c=1, n) -> (n, )
+        self.probs = probs # (*b, 1, n)
 
     def logpdf(self, y): 
-        # y is shape (n, )
+        # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically.
 
         return B.sum(
             B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
-            axis=0,
+            axis=(-2, -1),
         )
                 
 
 class GammaDistribution:
 
-    def __init__(self, kappa, chi):
-        self.kappa = kappa[0, :] # shape (c=1, n_adjusted) -> (n_adjusted, )
-        self.chi = chi[0, :] # shape (c=1, n_adjusted) -> (n_adjusted, )
+    def __init__(self, params):
+        self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
+        self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
 
-    def logpdf(self, y):
-        # y is of shape(n_adjusted, )
+    def logpdf(self, y_rain, y_amount):
+        # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         return B.sum(
-            (self.kappa - 1) * B.log(y) - (y / self.chi) - (B.log(gamma(self.kappa)) + self.kappa * B.log(self.chi)),
-            axis=0,
+            torch.nan_to_num(
+                ((self.kappa - 1) * torch.log(y_amount) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().numpy()))) + self.kappa * torch.log(self.chi))) * y_rain,
+                nan=0.0,
+            ),
+            axis=(-2, -1),
         )
 
 
@@ -72,42 +75,25 @@ class BernoulliGammaDist:
 
     def __init__(self, z_bernoulli, z_gamma):
 
-        if len(z_bernoulli.shape) == 2 and len(z_gamma.shape) == 2:
-            z_bernoulli, z_gamma = z_bernoulli.reshape(1, *z_bernoulli.shape), z_gamma.reshape(1, *z_gamma.shape)
-
-        # These are the model predictions for bernoulli statistic and gamma statistics.
-        self.bernoulli_prob = B.sigmoid(z_bernoulli) # shape (samples, c=1, n)
-        self.z_gamma = B.softplus(z_gamma) # shape (samples, c=2, n)
+        # These are the model predictions for bernoulli statistic and gamma statistics. (*b, c, n) where c=1 for bernouuli and c=2 for gamma
+        self.bernoulli_prob = B.sigmoid(z_bernoulli)
+        self.z_gamma = B.softplus(z_gamma)
 
     def logpdf(self, ys):
 
-        y_rain, y_amount = ys
-        y_rain = y_rain[0] # (1, n) -> (n,)
-        y_amount = y_amount[0] # (1, n) -> (n,) 
-        samples_loglik = []
+        # Next 3 lines unaggregate the Aggregate ys into a stack of torch tensors via a list (of shape (*b, 2, n))
+        ys = [el for el in ys]
+        ys = torch.stack(ys)
+        ys = torch.tensor(ys, dtype=torch.float32)
+        y_rain = ys[0] # (b, 1, n)
+        y_amount = ys[1] # (b, 1, n)
 
-        for s in range(self.z_gamma.shape[0]):
+        bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
+        bernoulli_cost = bernoulli_dist.logpdf(y_rain)
+        gamma_dist = GammaDistribution(self.z_gamma) 
+        gamma_cost = gamma_dist.logpdf(y_amount, y_rain)
 
-            bernoulli_dist = BernoulliDistribution(self.bernoulli_prob[s])
-
-            y_amount_adjusted = [] # adjusted to only include days that it did rain. 
-            z_gamma_adjusted = [] # only look at model's predicted gamma statistics if y says it did rain. 
-            for i, [rain, amount] in enumerate(zip(y_rain, y_amount)):
-
-                if rain:
-                    y_amount_adjusted.append(amount.cpu().detach().numpy())
-                    z_gamma_adjusted.append(self.z_gamma[s, :, i].cpu().detach().numpy())
-            
-            if y_amount_adjusted:
-                y_amount_adjusted = torch.tensor(np.array(y_amount_adjusted), dtype=torch.float32) # Should be size (n_adjusted, )
-                z_gamma_adjusted = torch.tensor(np.array(z_gamma_adjusted).T, dtype=torch.float32) # Should be size (c=2, n_adjusted)
-                gamma_dist = GammaDistribution(z_gamma_adjusted[0, :].reshape(1, -1), z_gamma_adjusted[1, :].reshape(1, -1))
-                samples_loglik.append(bernoulli_dist.logpdf(y_rain) + gamma_dist.logpdf(y_amount_adjusted)) # sum should be shape (samples, )
-
-            else:
-                samples_loglik.append(bernoulli_dist.logpdf(y_rain)) # should be shape (samples, )
-
-        return torch.tensor(samples_loglik, dtype=torch.float32) # should be shape (samples, )
+        return torch.tensor(bernoulli_cost + gamma_cost, dtype=torch.float32) # (*b,) = (num_samples, num_batches)
 
 
 class combined:
@@ -193,7 +179,7 @@ class combined:
                 net,
                 nps.SetConv(scale=1 / discretisation),
                 nps.Splitter(1, 2),
-                lambda xs: BernoulliGammaDist(*xs),
+                lambda xs: BernoulliGammaDist(*xs), # (*b, c, n) for each of bernoulli (c=1) and gamma (c=2)
             ),
         )
 
@@ -395,29 +381,25 @@ def train(state, model, opt, objective, gen, *, epoch):
     batches = gen.epoch()
     for i, batch in enumerate(batches):
         if i == 0: print('data gen device:', B.device(batch['xc']))
+        # must all be of shape (*b, c, n) where c=2 for both yc(t) and xc(t), and c=1 for yc(t)_bernoulli(precip)
         xc = batch['xc']
-        yc_bernoulli, yc_precip = batch['yc']
-        yt_bernoulli, yt_precip = batch['yt']
-        # all var (inc. ys) must be of shape (c, n) even if c = 1
-        yc_bernoulli, yc_precip, yt_bernoulli, yt_precip = yc_bernoulli.reshape(1, -1), yc_precip.reshape(1, -1), yt_bernoulli.reshape(1, -1), yt_precip.reshape(1, -1)
+        yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :]
+        yt_bernoulli, yt_precip = batch['yt'][..., 0:1, :], batch['yt'][..., 1:2, :]
+        # print(xc.shape, yc_bernoulli.shape, yc_precip.shape) # tick
         obj = objective(
                 model,
                 [(xc, yc_bernoulli), (xc, yc_precip)],
                 batch["xt"],
                 nps.Aggregate(yt_bernoulli, yt_precip),
             )
-        obj = obj.reshape(1, -1)
         vals.append(B.to_numpy(obj))
-        # Be sure to negate the output of `objective`.
         val = -B.mean(obj)
         opt.zero_grad(set_to_none=True)
         val.backward()
         opt.step()
     
-    ## changed as outputs are 1d from decoder now. Takes 'vals' as a 1D numpy array:
-    vals = np.array(vals)
-    out.kv("Loglik (T)", exp.with_err(vals))
-    return state, B.mean(vals)
+    out.kv("Loglik (T)", exp.with_err(B.concat(*vals)))
+    return state, B.mean(B.concat(*vals))
 
 
 def eval(state, model, objective, gen):
@@ -427,23 +409,18 @@ def eval(state, model, objective, gen):
         batches = gen.epoch()
         for batch in batches:
             xc = batch['xc']
-            yc_bernoulli, yc_precip = batch['yc']
-            yt_bernoulli, yt_precip = batch['yt']
-            # all var (inc. ys) must be of shape (c, n) even if c = 1
-            yc_bernoulli, yc_precip, yt_bernoulli, yt_precip = yc_bernoulli.reshape(1, -1), yc_precip.reshape(1, -1), yt_bernoulli.reshape(1, -1), yt_precip.reshape(1, -1)
+            yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :]
+            yt_bernoulli, yt_precip = batch['yt'][..., 0:1, :], batch['yt'][..., 1:2, :]
             obj = objective(
-                model,
-                [(xc, yc_bernoulli), (xc, yc_precip)],
-                batch["xt"],
-                nps.Aggregate(yt_bernoulli, yt_precip),
-            )
-            # Save numbers.
+                    model,
+                    [(xc, yc_bernoulli), (xc, yc_precip)],
+                    batch["xt"],
+                    nps.Aggregate(yt_bernoulli, yt_precip),
+                )
             vals.append(B.to_numpy(obj))
 
-        ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
-        vals = np.array(vals)
-        out.kv("Loglik (V)", exp.with_err(vals))
-        return state, B.mean(vals)
+        out.kv("Loglik (V)", exp.with_err(B.concat(*vals)))
+        return state, B.mean(B.concat(*vals))
 
 
 def main(config, _config):
@@ -623,7 +600,7 @@ if __name__ == '__main__':
 
     _config = {
         "type": "combined", # NOTE: 'seperate' is not yet operational
-        "arch": 'convnet',
+        "arch": 'unet',
         "objective": 'elbo',
         "model": 'Rainfall',
         "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
@@ -641,7 +618,7 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 16,
+        "num_batches": 3,
         "discretisation": 2,
         "encoder_channels": 32,
         "decoder_channels": 32,

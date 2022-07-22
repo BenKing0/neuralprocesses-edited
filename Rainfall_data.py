@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 from sys import getsizeof
 import shutup
+from tqdm import tqdm, trange
 shutup.please()
 
 
@@ -16,12 +17,14 @@ class rainfall_generator:
     def __init__(
         self, 
         batch_size, 
+        num_batches: int = 1,
         nc_bounds: Tuple[int, int] = [50, 70],
         nt_bounds: Tuple[int, int] = [100, 140],
         include_binary: bool = True,
         device='cpu'
         ):
         self.batch_size = batch_size
+        self.num_batches = num_batches
         self.device = device
         self.include_binary = include_binary
 
@@ -35,7 +38,7 @@ class rainfall_generator:
             return 10000*date.year + 100*date.month + date.day
 
 
-    def batch(self, day_ind):
+    def _sub_batch(self, day_ind):
 
         _start = datetime(2018, 1, 1)
         _d = self.days[day_ind] 
@@ -58,7 +61,7 @@ class rainfall_generator:
         else:
             yc, yt = [_precip[:self.nc], _binary[:self.nc]], [_precip[self.nc:], _binary[self.nc:]] # to shape [2, nc(nt)]
 
-        batch = {
+        sub_batch = {
             'xc': torch.tensor(xc, dtype=torch.float32).to(self.device),
             'yc': torch.tensor(yc, dtype=torch.float32).to(self.device),
             'xt': torch.tensor(xt, dtype=torch.float32).to(self.device),
@@ -66,18 +69,39 @@ class rainfall_generator:
             'reference': reference,
             'date': date,
         }
-        return batch
+        return sub_batch
 
 
     def epoch(self):
         '''
-        Return an epoch's worth of data in the form (b, c, n) for all of xc, yc, xt, yt (in dict form). 
+        Return an epoch's worth of data in the form (b', b, c, n) for all of xc, yc, xt, yt (in dict form), where b' is num_batches, and b is batch_size
         Note that epoch = [batch1, ...] and batchi = {'xc': ..., 'yc': ..., ...} by convention.
         '''
 
         epoch = []
-        for i in range(self.batch_size):
-            epoch.append(self.batch(i))
+        for _ in range(self.num_batches):
+
+            xc, yc, xt, yt, reference, dates = [], [], [], [], [], []
+            for j in range(self.batch_size):
+                sub_batch = self._sub_batch(j)
+                xc.append(sub_batch['xc'])
+                xt.append(sub_batch['xt'])
+                yc.append(sub_batch['yc'])
+                yt.append(sub_batch['yt'])
+                reference.append(sub_batch['reference'])
+                dates.append(sub_batch['date'])
+
+            batch = {
+                # each of shape (b, c, n) where b=batch_size and c=2 for xs and ys:
+                'xc': torch.stack(xc).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+                'date': dates,
+            }
+
+            epoch.append(batch)
 
         return epoch
 
@@ -96,9 +120,11 @@ class Bernoulli_Gamma_synthetic:
         gp_mean: float = 0.,
         num_ref_points: int = None,
         include_binary: bool = True,
+        num_batches: int = 1,
         ):
 
         self.batch_size = batch_size
+        self.num_batches = num_batches
         self.xrange = xrange
         self.device = device
         self.nc_bounds = nc_bounds
@@ -131,13 +157,10 @@ class Bernoulli_Gamma_synthetic:
         xs, ys = list(zip(*_sliced))
         return xs, ys
 
+    
+    def _sub_batch(self):
 
-    def batch(self):
-
-        nc = random.randint(*self.nc_bounds)
-        nt = random.randint(*self.nt_bounds)
-
-        xs = np.random.uniform(low=self.xrange[0], high=self.xrange[1], size=(int(nc+nt), 2))
+        xs = np.random.uniform(low=self.xrange[0], high=self.xrange[1], size=(int(self.nc+self.nt), 2))
         xs, gp_sample = self._construct_gp_sample(xs, self.gram)
         xs, ys = self._cutoff(xs, gp_sample)
 
@@ -157,12 +180,12 @@ class Bernoulli_Gamma_synthetic:
 
         _zipped = list(zip(xs, ys))
         random.shuffle(_zipped)
-        contexts, targets = _zipped[:nc], _zipped[nc:]
+        contexts, targets = _zipped[:self.nc], _zipped[self.nc:]
 
         xc, yc = list(zip(*contexts))
         xt, yt = list(zip(*targets))
 
-        batch = {
+        sub_batch = {
             # NOTE: use of .T on tensor depracated and will cause errors eventually.
             'xc': torch.tensor(np.array(xc), dtype=torch.float32).T.to(self.device),
             'yc': torch.tensor(np.array(yc), dtype=torch.float32).T.to(self.device),
@@ -170,22 +193,46 @@ class Bernoulli_Gamma_synthetic:
             'yt': torch.tensor(np.array(yt), dtype=torch.float32).T.to(self.device),
             'reference': reference,
         }
-        return batch
+        return sub_batch
 
 
     def epoch(self):
         '''
-        Return an epoch's worth of data in the form (b, c, n) for all of xc, yc, xt, yt (in dict form). 
+        Return an epoch's worth of data in the form (b', b, c, n) for all of xc, yc, xt, yt (in dict form), where b' is num_batches, and b is batch_size
         Note that epoch = [batch1, ...] and batchi = {'xc': ..., 'yc': ..., ...} by convention.
         '''
 
         epoch = []
-        for _ in range(self.batch_size):
-            epoch.append(self.batch())
+        for _ in range(self.num_batches):
+
+            nc = random.randint(*self.nc_bounds)
+            nt = random.randint(*self.nt_bounds)
+            self.nc, self.nt = nc, nt
+
+            xc, yc, xt, yt, reference = [], [], [], [], []
+            for _ in trange(self.batch_size):
+                sub_batch = self._sub_batch()
+                xc.append(sub_batch['xc'])
+                xt.append(sub_batch['xt'])
+                yc.append(sub_batch['yc'])
+                yt.append(sub_batch['yt'])
+                reference.append(sub_batch['reference'])
+
+            batch = {
+                # each of shape (b, c, n) where b=batch_size and c=2 for xs and ys:
+                'xc': torch.stack(xc).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }
+
+            epoch.append(batch)
 
         return epoch
 
 
+# TODO: not changes since batch dimensions altered!
 if __name__ == '__main__':
 
     synthetic = Bernoulli_Gamma_synthetic(
