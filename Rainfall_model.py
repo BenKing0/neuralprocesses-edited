@@ -39,20 +39,26 @@ def _merge_context_target(contexts: List, xt: B.Numeric, yt: base.Aggregate):
     )
 
 
+# TODO: why are probabilities 'clumping'? (stay v similar to initialised value as if backprop not effective)
 class BernoulliDistribution:
 
     def __init__(self, probs):
         self.probs = probs # (*b, 1, n)
+        print(self.probs)
 
     def logpdf(self, y): 
         # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically.
 
         return B.sum(
-            B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
+            torch.nan_to_num(
+                B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
+                nan=-1e5,
+            ),
             axis=(-2, -1),
         )
                 
 
+# TODO: also clumping with chis and kappas
 class GammaDistribution:
 
     def __init__(self, params):
@@ -62,10 +68,11 @@ class GammaDistribution:
     def logpdf(self, y_rain, y_amount, device):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
+        # nan_to_num used for when chi tends to 0 or kappa to infinity to maximise logpdf. Also when y_amount = 0 and y_rain = 0 (1), logpdf contributions should be 0 (very negative).
         return B.sum(
             torch.nan_to_num(
-                ((self.kappa - 1) * torch.log(y_amount) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device)) + self.kappa * torch.log(self.chi))) * y_rain,
-                nan=0.0,
+                ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device)) + self.kappa * torch.log(self.chi))) * y_rain,
+                nan=-1e5,
             ),
             axis=(-2, -1),
         )
@@ -443,13 +450,13 @@ def main(config, _config):
             gen_train, gen_cv, gens_eval = [    
                 rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True, device=device),
                 rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
-                rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
+                rainfall_generator(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
                 ]
     else:
         gen_train, gen_cv, gens_eval = [    
                 Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
                 Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
-                Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
+                Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
             ]
 
     if config.type == "combined":
@@ -523,7 +530,7 @@ def main(config, _config):
             )
 
         with out.Section('ELBO'):
-            state, _ = eval(state, model, objective_eval, gens_eval)
+            state, _ = eval(state, model, objective_eval, gen_cv)
 
     ## In a training (and cv) regime:
     else:
@@ -608,20 +615,20 @@ if __name__ == '__main__':
         "model": 'Rainfall',
         "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_y": 1, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
-        "dim_lv": 1, # TODO: is high LV dim detramental?
+        "dim_lv": 16, # TODO: is high LV dim detramental?
         "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 30,
         "train_test": None,
         "evaluate": False,
-        "rate": 3e-4,
+        "rate": 1e-3, # 3e-4,
         "evaluate_last": False,
         "evaluate_num_samples": 20,
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 16,
+        "num_batches": 1,
         "discretisation": 2,
         "encoder_channels": 32,
         "decoder_channels": 32,

@@ -46,30 +46,30 @@ def plot_classifier_1d(state, model, gen, save_path, means=None, vars=None, prio
             return numer / Z
 
         epoch = gen.epoch()
-        batch = epoch[0] ## arbitrarily take the first batch (task) from the epoch to plot
+        batch = epoch[0] ## arbitrarily take the first epoch to plot
 
         # Predict with model.
         with torch.no_grad():
             state, dist = model(state, batch['xc'], batch['yc'], batch['xt']) ## 'dist' here is the BernoulliDistribution class defined above (only implemented for binary classification)
-            class_1_probs = dist.probs
+            class_1_probs = dist.probs[0] # (1, 1, n) to (1, n)
         
-        rhos = B.squeeze(class_1_probs) ## (1, n) => (n, )
+        rhos = B.squeeze(class_1_probs) # (1, n) => (n, )
         membership = B.cast(torch.float32, rhos > 0.5)
-        groups = _group_classes(B.to_numpy(B.squeeze(batch['xt'])), B.to_numpy(rhos), B.to_numpy(membership))
+        groups = _group_classes(B.to_numpy(B.squeeze(batch['xt'][0])), B.to_numpy(rhos), B.to_numpy(membership))
 
         ## generate smooth prediction line for visualisation purposes
-        smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt'].cpu()), B.max(*batch['xt'].cpu()), 1000), axis=0)
+        smooth_xs = B.expand_dims(B.linspace(B.min(*batch['xt'][0].cpu()), B.max(*batch['xt'][0].cpu()), 1000), axis=0)
         smooth_preds_multi = []
         for _ in range(num_samples):
             _, smooth_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, smooth_xs))
-            _smooth_preds = smooth_dist.probs
+            _smooth_preds = smooth_dist.probs[0]
             smooth_preds_i = B.squeeze(_smooth_preds)
             smooth_preds_multi.append(smooth_preds_i.cpu().detach().numpy())
         smooth_preds = np.mean(smooth_preds_multi, axis=0)
         smooth_preds_stddev = np.std(smooth_preds_multi, axis=0)
 
         sns.set_theme()
-        plt.scatter(batch['xt'], batch['yt'], marker='.', c='k', label='Targets')
+        plt.scatter(batch['xt'][0].T, batch['yt'][0].T, marker='.', c='k', label='Targets')
         cs = ['xkcd:light red', 'xkcd:light blue']
         for class_, group in groups:
             plt.plot(group.x, group.y, '+', color=cs[int(class_)], label=f'{int(class_)} predicted')
@@ -108,44 +108,44 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
 
         with torch.no_grad():
             state, dist = model(state, batch['xc'], batch['yc'], batch['xt']) 
-            prob_vectors = dist.probs ## (k, n) for k classes and n target points
+            prob_vectors = dist.probs[0, 0] ## (k, n) for k classes and n target points
 
         np_batch = {key: B.to_numpy(value) for key, value in batch.items() if key != 'reference'}
         np_probs = B.to_numpy(prob_vectors)
-        if batch['yt'].shape[0] == 1:
+        if batch['yt'][0].shape[1] == 1:
             memberships = B.cast(torch.int32, prob_vectors > 0.5)
-            true_memberships = B.cast(torch.int32, batch['yt'])
+            true_memberships = B.cast(torch.int32, batch['yt'][0])
         else:
             memberships = B.argmax(prob_vectors, axis=0) ## convert (k, n) array of probabilities to (n, ) integers
-            true_memberships = B.argmax(batch['yt'], axis=0)
-        x_dict, groups = _group_classes(np.transpose(np_batch['xt']), np_probs[hmap_class], B.to_numpy(B.squeeze(true_memberships)))
+            true_memberships = B.argmax(batch['yt'][0], axis=0)
+        x_dict, groups = _group_classes(np.transpose(np_batch['xt'][0]), np_probs[hmap_class], B.to_numpy(B.squeeze(true_memberships)))
 
         num = 150
-        hmap_x = np.linspace(min(np_batch['xt'].flatten()), max(np_batch['xt'].flatten()), num)
+        hmap_x = np.linspace(min(np_batch['xt'][0].flatten()), max(np_batch['xt'][0].flatten()), num)
         hmap_X = np.meshgrid(hmap_x, hmap_x) ## of shape (2, _num, _num) = (coords, xs, ys)
-        hmap_X = np.array(hmap_X).reshape((2, num**2)) ## of shape (2, _num ^ 2) to be of (c, n) shape
+        hmap_X = np.array(hmap_X).reshape((1, 2, num**2)) ## of shape (1, 2, _num ^ 2) to be of (b, c, n) shape
         hmap_probs_multi = []
         for _ in range(num_samples):
             _, hmap_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, hmap_X))
-            hmap_probs_i = hmap_dist.probs[hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
+            hmap_probs_i = hmap_dist.probs[0][hmap_class] ## (k, _num ^ 2) for k classes and _num points: (k, _num ^ 2) => (_num ^ 2, ) when selecting hmap_class
             hmap_probs_multi.append(hmap_probs_i.cpu().detach().numpy())
         hmap_probs = np.mean(hmap_probs_multi, axis=0)
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
-        _, ref_ys = list(zip(*batch['reference'])) # this is a list(zip(ref_xs, ref_ys))
+        _, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
         ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
 
         sns.set_theme()
         _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
-        plot1 = ax1.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)  
-        plot2 = ax2.imshow(ref_ys, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0]), max(hmap_X[0]), min(hmap_X[1]), max(hmap_X[1])], alpha=0.4)   
+        plot1 = ax1.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0, 0]), max(hmap_X[0, 0]), min(hmap_X[0, 1]), max(hmap_X[0, 1])], alpha=0.4)  
+        plot2 = ax2.imshow(ref_ys, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0, 0]), max(hmap_X[0, 0]), min(hmap_X[0, 1]), max(hmap_X[0, 1])], alpha=0.4)   
         plt.colorbar(plot1, ax=ax1)
         plt.colorbar(plot2, ax=ax2)
-        markers = itertools.cycle(('x', '.', 'o', '+', '*'))
+        markers = itertools.cycle(('.', '.', 'o', '+', '*'))
         for class_, _ in groups:
             x = x_dict[class_]
-            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True', size=0.5)
-        ax1.legend()
+            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True', s=0.5)
+        # ax1.legend()
         if B.max(memberships) == 1:
             ax1.set_title('Colormap scaled by class 1')
         else:

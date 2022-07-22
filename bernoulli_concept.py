@@ -13,19 +13,23 @@ from torch_classification_data_gens import example_data_gen, gp_cutoff
 from torch_classification_plotting import plot_classifier_1d, plot_classifier_2d
 shutup.please()
 
+
 class BernoulliDistribution(torch.nn.Module):
     def __init__(self, probs):
         super().__init__()
         self.probs = probs
+        print(self.probs)
 
-    def logpdf(self, y): # define a CLASSIFICATION probability for calculation of loglik in ELBO non lv part.
-        if 0. not in self.probs and 1. not in self.probs:
-            return B.sum(
+    def logpdf(self, y): 
+        # y of shape (b, 1, n) and self.probs of shape (*b, 1, n). Any broadcasting done automatically.
+
+        return torch.nan_to_num(
+            B.sum(
                 B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
-                axis=-1,
-            )   # axis either -1 or (-2, -1)
-        else:
-            return 0
+                axis=(-2, -1),
+            ),
+            nan=-1e5,
+        ) 
 
     def class_1_prob(self):
         # To access outside where likelihood defined in model building.
@@ -145,8 +149,8 @@ def train(state, model, opt, objective, gen, *, epoch):
     
     ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
     vals = np.array(vals)
-    out.kv("Loglik (T)", exp.with_err(vals))
-    return state, B.mean(vals)
+    out.kv("Loglik (T)", exp.with_err(B.concat(*vals)))
+    return state, B.mean(B.concat(*vals))
 
 
 def eval(state, model, objective, gen):
@@ -164,13 +168,11 @@ def eval(state, model, objective, gen):
             )
 
             # Save numbers.
-            n = nps.num_data(batch["xt"], batch["yt"])
             vals.append(B.to_numpy(obj))
 
         ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
-        vals = np.array(vals)
-        out.kv("Loglik (V)", exp.with_err(vals))
-        return state, B.mean(vals)
+        out.kv("Loglik (V)", exp.with_err(B.concat(*vals)))
+        return state, B.mean(B.concat(*vals))
 
 
 def main(config, _config):
@@ -223,8 +225,8 @@ def main(config, _config):
         assert sum(priors) == 1.
         ## generated epochs from these are of shape (b, c, n)
         gen_train, gen_cv, gens_eval = [    
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.num_batches, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.batch_size, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.batch_size, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             example_data_gen(means, covariances, dim_x=dim_x, num_batches=1, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             ]
 
@@ -232,9 +234,9 @@ def main(config, _config):
         xrange = [[0]*config.dim_x, [60]*config.dim_x]
         means, covariances, priors = None, None, None ## don't use these in plotting
         gen_train, gen_cv, gens_eval = [    
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
-            gp_cutoff(config.dim_x, xrange, num_batches=config.num_batches, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
-            gp_cutoff(config.dim_x, xrange, num_batches=1, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
+            gp_cutoff(config.dim_x, xrange, batch_size=config.batch_size, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
+            gp_cutoff(config.dim_x, xrange, batch_size=config.batch_size, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
+            gp_cutoff(config.dim_x, xrange, batch_size=1, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
 
     else:
@@ -374,7 +376,7 @@ if __name__ == '__main__':
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
         "fix_noise": True, # NOTE: Not implemented
-        "num_batches": 16,
+        "batch_size": 16,
         "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
         "nc_bounds": [80, 100],
         "nt_bounds": [40, 50],

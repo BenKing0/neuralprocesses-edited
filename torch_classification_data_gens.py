@@ -3,12 +3,13 @@ import torch
 import random
 import numpy as np
 from statistics import median
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 
+# TODO: change batching
 class example_data_gen:
 
-    def __init__(self, means, covariances, num_batches = 16, dim_x: int = None, nc_bounds: list = [10, 20], nt_bounds: list = [10, 20], priors: list = [0.5, 0.5], device='cpu'):
+    def __init__(self, means, covariances, num_batches = 1, batch_size=16, dim_x: int = None, nc_bounds: list = [10, 20], nt_bounds: list = [10, 20], priors: list = [0.5, 0.5], device='cpu'):
         '''
         Returns a single epoch of batches (tasks) consisting of context and target set from a binary Mixture of Gaussians distribution with specified prior.
 
@@ -127,11 +128,12 @@ class gp_cutoff:
     ...
     '''
     
-    def __init__(self, dim_x, xrange, num_batches=16, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff='median', device='cpu', reference=False):
+    def __init__(self, dim_x, xrange, batch_size=16, num_batches=1, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', cutoff='median', device='cpu', reference=False):
 
         self.dim_x = dim_x
         self.xrange = xrange
         self.num_batches = num_batches
+        self.batch_size = batch_size
         self.kernel = kernel
         self.cutoff = cutoff
         self.nc_bounds = nc_bounds
@@ -145,13 +147,11 @@ class gp_cutoff:
         else: 
             print(f'Have not implemented {kernel} kernel, defaulting to EQ')
             f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
-        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in tqdm(x)]
+        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in x]
 
 
     def _construct_gp_sample(self, xs, ref_xs, gram):
 
-        # TODO: why are the target points not agreeing with the reference when plotting? 
-        # The agreement of total length shows that its the same gp sample they are coming from...
         gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
 
         if self.reference:
@@ -176,10 +176,7 @@ class gp_cutoff:
         return xs, ys
 
 
-    def batch(self, gram, cutoff, nc_bounds, nt_bounds, xrange, dim_x):
-
-        nc = random.randint(*nc_bounds)
-        nt = random.randint(*nt_bounds)
+    def _sub_batch(self, gram, cutoff, nc, nt, xrange, dim_x):
 
         xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
         ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 30) for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
@@ -203,9 +200,10 @@ class gp_cutoff:
 
     def epoch(self):
 
-        with B.on_device(self.device):
+        epoch = []
+        for _ in range(self.num_batches):
 
-            def convert_data(points):
+            def _convert_data(points):
                 _xc, _yc, _xt, _yt, ref = points
                 xc = B.transpose(torch.tensor(np.array(_xc), dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
                 xt = B.transpose(torch.tensor(np.array(_xt), dtype=torch.float32))
@@ -213,19 +211,28 @@ class gp_cutoff:
                 yt = B.expand_dims(torch.tensor(np.array(_yt), dtype=torch.float32), axis=0)
                 return xc, yc, xt, yt, ref
 
-            epoch = []        
-            for _ in range(self.num_batches):
-            
-                _points = self.batch(self.gram, self.cutoff, self.nc_bounds, self.nt_bounds, self.xrange, self.dim_x)
-                xc, yc, xt, yt, reference = convert_data(_points)
+            nc = random.randint(*self.nc_bounds)
+            nt = random.randint(*self.nt_bounds)
 
-                batch = {
-                    'xc': xc.to(self.device),
-                    'yc': yc.to(self.device),
-                    'xt': xt.to(self.device),
-                    'yt': yt.to(self.device),
-                    'reference': reference 
-                }
-                epoch.append(batch)
+            xc, yc, xt, yt, reference = [], [], [], [], []       
+            for _ in trange(self.batch_size):
 
-            return epoch   
+                _points = self._sub_batch(self.gram, self.cutoff, nc, nt, self.xrange, self.dim_x)
+                sub_xc, sub_yc, sub_xt, sub_yt, sub_reference = _convert_data(_points)
+
+                xc.append(sub_xc)
+                yc.append(sub_yc)
+                xt.append(sub_xt)
+                yt.append(sub_yt)
+                reference.append(sub_reference)
+
+            batch = {
+                'xc': torch.stack(xc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }
+            epoch.append(batch)
+
+        return epoch   
