@@ -59,12 +59,12 @@ class GammaDistribution:
         self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
         self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
 
-    def logpdf(self, y_rain, y_amount):
+    def logpdf(self, y_rain, y_amount, device):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         return B.sum(
             torch.nan_to_num(
-                ((self.kappa - 1) * torch.log(y_amount) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().numpy()))) + self.kappa * torch.log(self.chi))) * y_rain,
+                ((self.kappa - 1) * torch.log(y_amount) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device)) + self.kappa * torch.log(self.chi))) * y_rain,
                 nan=0.0,
             ),
             axis=(-2, -1),
@@ -73,11 +73,12 @@ class GammaDistribution:
 
 class BernoulliGammaDist:
 
-    def __init__(self, z_bernoulli, z_gamma):
+    def __init__(self, z_bernoulli, z_gamma, device):
 
         # These are the model predictions for bernoulli statistic and gamma statistics. (*b, c, n) where c=1 for bernouuli and c=2 for gamma
         self.bernoulli_prob = B.sigmoid(z_bernoulli)
         self.z_gamma = B.softplus(z_gamma)
+        self.device = device
 
     def logpdf(self, ys):
 
@@ -91,7 +92,7 @@ class BernoulliGammaDist:
         bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
         bernoulli_cost = bernoulli_dist.logpdf(y_rain)
         gamma_dist = GammaDistribution(self.z_gamma) 
-        gamma_cost = gamma_dist.logpdf(y_amount, y_rain)
+        gamma_cost = gamma_dist.logpdf(y_amount, y_rain, self.device)
 
         return torch.tensor(bernoulli_cost + gamma_cost, dtype=torch.float32) # (*b,) = (num_samples, num_batches)
 
@@ -107,6 +108,7 @@ class combined:
         num_layers,
         encoder_num_channels,
         decoder_num_channels,
+        device,
         ):
 
         if arch == 'unet':
@@ -179,7 +181,7 @@ class combined:
                 net,
                 nps.SetConv(scale=1 / discretisation),
                 nps.Splitter(1, 2),
-                lambda xs: BernoulliGammaDist(*xs), # (*b, c, n) for each of bernoulli (c=1) and gamma (c=2)
+                lambda xs: BernoulliGammaDist(*xs, device=device), # (*b, c, n) for each of bernoulli (c=1) and gamma (c=2)
             ),
         )
 
@@ -457,6 +459,7 @@ def main(config, _config):
         decoder_num_channels=config.decoder_channels,
         num_layers=config.num_layers,
         dim_lv=config.dim_lv,
+        device=device,
         )
                
 
@@ -618,7 +621,7 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 3,
+        "num_batches": 16,
         "discretisation": 2,
         "encoder_channels": 32,
         "decoder_channels": 32,
