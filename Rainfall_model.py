@@ -59,18 +59,17 @@ class BernoulliDistribution:
 # TODO: also clumping with chis and kappas
 class GammaDistribution:
 
-    def __init__(self, params, device):
+    def __init__(self, params):
         self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
         self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
-        self.device = device
 
-    def logpdf(self, y_rain, y_amount):
+    def logpdf(self, y_rain, y_amount, device):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         # nan_to_num used for when chi tends to 0 or kappa to infinity to maximise logpdf. Also when y_amount = 0 and y_rain = 0 (1), logpdf contributions should be 0 (very negative).
         return B.sum(
             torch.nan_to_num(
-                ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device))) * y_rain,
+                ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device))) * y_rain,
                 nan=-1e5,
             ),
             axis=(-2, -1),
