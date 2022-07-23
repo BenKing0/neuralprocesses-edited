@@ -22,8 +22,6 @@ from Rainfall_plotting import rainfall_plotter
 from scipy.special import gamma
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
-from sys import getsizeof
-import pandas as pd
 shutup.please()
 
 

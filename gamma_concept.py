@@ -1,53 +1,46 @@
-import shutup
-from sklearn.metrics import mean_poisson_deviance
-import neuralprocesses.torch as nps
-import torch
-import lab.torch as B
-import wbml.out as out
-import experiment as exp
 import numpy as np
+import lab.torch as B
+import torch
+from scipy.special import gamma
+import neuralprocesses.torch as nps
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-from torch_classification_data_gens import example_data_gen, gp_cutoff
-from torch_classification_plotting import plot_classifier_1d, plot_classifier_2d
-shutup.please()
+import wbml.out as out
+from torch_gamma_data_gens import gp_example
+from torch_gamma_plotting import plot_1d, plot_2d
+import experiment as exp
+from scipy.stats import loggamma
 
 
-class BernoulliDistribution(torch.nn.Module):
-    def __init__(self, probs):
-        super().__init__()
-        self.probs = probs
-        # print(self.probs)
+class GammaDistribution:
 
-    def logpdf(self, y): 
-        # y of shape (b, 1, n) and self.probs of shape (*b, 1, n). Any broadcasting done automatically.
+    def __init__(self, params, device):
+        self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
+        self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
+        self.device = device
 
-        return torch.nan_to_num(
-            B.sum(
-                B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
-                axis=(-2, -1),
-            ),
-            nan=-1e5,
-        ) 
-
-    def class_1_prob(self):
-        # To access outside where likelihood defined in model building.
-        # Or just use 'dist(=BernoulliLikelihood).probs'
-        return self.probs
+    def logpdf(self, y_amount):
+        # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
+            
+        return B.sum(
+            # torch.nan_to_num(
+            #     ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)) + self.kappa * torch.log(self.chi))),
+            #     nan=-1e5,
+            # ),
+            loggamma.pdf(y_amount, c=self.kappa.detach().cpu().numpy(), scale=self.chi.detach().cpu().numpy()),
+            axis=(-2, -1),
+        )
 
 
-def construct_bernoulli_model(  
+def construct_gamma_model(  
     dim_x = 1, 
     dim_y = 1, 
     dim_lv = 16,
     lv_likelihood = 'lowrank',
     discretisation = 16,
+    device='cpu',
     ):
-    """
-    Construct a model with a Gaussian heterogenous or a lowrank approximated encoder likelihood (if dim_lv > 0)
-    and a Bernoulli decoder likelihood for binary classification. 'dim_y' MUST equal 1 for binary classification.
-    """
 
     if dim_y != 1:
         print("'dim_y' MUST equal 0 for binary classification. Defaulted to 1.")
@@ -70,21 +63,21 @@ def construct_bernoulli_model(
 
 
     # CNN architecture:
-    ##TODO: finish making dim_lv = 0 capable
+    # TODO: finish making dim_lv = 0 capable
     decoder_channels = (32,) * 6
     encoder_channels = (32,) * 6
     if dim_lv > 0:
         unet_latent_variable = nps.UNet(
             dim=dim_x,
             in_channels=2 * dim_y,
-            out_channels=out_channels,    ## ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
+            out_channels=out_channels,    # ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
             channels=encoder_channels,
         )
         
         unet = nps.UNet(
             dim=dim_x,
             in_channels=dim_lv,
-            out_channels=1 * dim_y, ## 1 per output dimension as Bernoulli has a single sufficient statistic
+            out_channels=2 * dim_y, # 2 per output dimension as Gamma has two sufficient statistics
             channels=decoder_channels,
         )
 
@@ -93,7 +86,7 @@ def construct_bernoulli_model(
         unet = nps.UNet(
             dim=dim_x,
             in_channels = sum(dim_yc) + len(dim_yc),
-            out_channels=1 * dim_y, ## 1 per output dimension as Bernoulli has a single sufficient statistic
+            out_channels=2 * dim_y, # 2 per output dimension as Gamma has two sufficient statistics
             channels=decoder_channels,
         )
 
@@ -119,7 +112,7 @@ def construct_bernoulli_model(
     decoder = nps.Chain(
         unet,
         nps.SetConv(scale=1 / disc.points_per_unit),
-        lambda z: BernoulliDistribution(B.sigmoid(z)),  ## softplus trained way faster but caused numerical issues when self.probs > 1
+        lambda z: GammaDistribution(B.softplus(z), device=device),
     )
     model = nps.Model(encoder, decoder)
 
@@ -143,7 +136,6 @@ def train(state, model, opt, objective, gen, *, epoch):
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
         val = -B.mean(obj)
-        print(obj, val)
         opt.zero_grad(set_to_none=True)
         val.backward()
         opt.step()
@@ -178,14 +170,6 @@ def eval(state, model, objective, gen):
 
 def main(config, _config):
 
-    model = construct_bernoulli_model(
-        dim_x = config.dim_x,
-        dim_y = config.dim_y,
-        dim_lv = config.dim_lv,
-        lv_likelihood = config.lv_likelihood,
-        discretisation = config.discretisation,
-    )
-
     if torch.cuda.is_available():
         device = "cuda"
     else:
@@ -193,6 +177,14 @@ def main(config, _config):
     B.set_global_device(device)
     print('global device: ', B.ActiveDevice.active_name)
     print('model device: ', device)
+    model = construct_gamma_model(
+        dim_x = config.dim_x,
+        dim_y = config.dim_y,
+        dim_lv = config.dim_lv,
+        lv_likelihood = config.lv_likelihood,
+        discretisation = config.discretisation,
+        device=device,
+    )
     model = model.to(device)
     out.kv("Number of parameters", nps.num_params(model))
 
@@ -213,35 +205,17 @@ def main(config, _config):
     )
 
     # Tensors are always of the form `(b, c, n)`.
-    if config.data not in ['binary_MoG', 'gp_cutoff']:
-        print('Data generator has to be a classification one, defaulting to Binary MoG.')
-        config.data = 'binary_MoG'
+    if config.data not in ['gamma_gp']:
+        print(f'Data generator {config.data} not implemented, defaulting to Example')
+        config.data = 'gamma_gp'
 
-    if config.data == 'binary_MoG':
-        means = [[-1] , [1]]
-        covariances = [[0.5], [0.5]]
+    if config.data == 'gamma_gp':
         dim_x = config.dim_x
-        assert np.array(means[0]).ndim == dim_x and np.array(covariances[0]).ndim == dim_x
-        priors = [0.5, 0.5]
-        assert sum(priors) == 1.
-        ## generated epochs from these are of shape (b, c, n)
         gen_train, gen_cv, gens_eval = [    
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.batch_size, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=config.batch_size, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
-            example_data_gen(means, covariances, dim_x=dim_x, num_batches=1, priors=priors, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_example(dim_x=dim_x, batch_size=config.batch_size, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_example(dim_x=dim_x, batch_size=config.batch_size, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
+            gp_example(dim_x=dim_x, batch_size=1, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
-
-    elif config.data == 'gp_cutoff':
-        xrange = [[0]*config.dim_x, [60]*config.dim_x]
-        means, covariances, priors = None, None, None ## don't use these in plotting
-        gen_train, gen_cv, gens_eval = [    
-            gp_cutoff(config.dim_x, xrange, batch_size=config.batch_size, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
-            gp_cutoff(config.dim_x, xrange, batch_size=config.batch_size, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
-            gp_cutoff(config.dim_x, xrange, batch_size=1, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
-            ]
-
-    else:
-        pass
 
     objective = partial(
             nps.elbo,
@@ -273,9 +247,9 @@ def main(config, _config):
 
         for i in range(config.evaluate_plot_num_samples):
             if config.dim_x == 1:
-                plot_classifier_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
+                plot_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
             elif config.dim_x == 2:
-                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
+                plot_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True)
 
         with out.Section('ELBO'):
             state, _ = eval(state, model, objective_eval, gen_cv)
@@ -338,9 +312,9 @@ def main(config, _config):
                     )
 
                 if config.dim_x == 1:
-                    plot_classifier_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
+                    plot_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device)
                 elif config.dim_x == 2:
-                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device)
+                    plot_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True)
 
 
 if __name__ == '__main__':
@@ -354,14 +328,14 @@ if __name__ == '__main__':
     _config = {
         ## Model configs are hardcoded in 'construct_bernoulli_model' - change them there
         ## below are configs that do change the nature of the model/data/working directory
-        "likelihood": 'bernoulli',
+        "likelihood": 'gamma',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'ConvCorrBNP',
+        "model": 'ConvCorrGNP',
         "dim_x": 2,
         "dim_y": 1, # NOTE: Has to be the case for binary classification
-        "dim_lv": 2, # TODO: is a high LV dim detramental?
-        "data": 'gp_cutoff',
+        "dim_lv": 16, # TODO: is a high LV dim detrimental?
+        "data": 'gamma_gp',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 30,

@@ -45,11 +45,9 @@ def rainfall_plotter(
     hmap_bernoulli = B.to_numpy(hmap_dist.bernoulli_prob) # (1, 1, num^2)
     hmap_kappa, hmap_chi = hmap_dist.z_gamma[..., 0:1, :], hmap_dist.z_gamma[..., 1:2, :] # both (1, 1, num^2)
 
-    # TODO: must be faster way to do this
     hmap_rain = np.zeros(hmap_bernoulli.shape[-1])
     for i, (kappa_i, chi_i, bern_i) in enumerate(zip(hmap_kappa.reshape(-1), hmap_chi.reshape(-1), hmap_bernoulli.reshape(-1))):
         if bern_i > 0.5:
-            # TODO: should this be a mean over samples?
             sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=chi_i.detach().cpu().numpy(), size=num_samples))
             hmap_rain[i] = sample_i
         else:
