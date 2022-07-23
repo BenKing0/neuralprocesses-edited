@@ -24,11 +24,10 @@ class GammaDistribution:
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         return B.sum(
-            # torch.nan_to_num(
-            #     ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - (y_amount / self.chi) - (torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)) + self.kappa * torch.log(self.chi))),
-            #     nan=-1e5,
-            # ),
-            loggamma.pdf(y_amount, c=self.kappa.detach().cpu().numpy(), scale=self.chi.detach().cpu().numpy()),
+            torch.nan_to_num(
+                (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)),
+                nan=-1e5,
+            ),
             axis=(-2, -1),
         )
 
