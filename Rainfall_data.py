@@ -10,6 +10,10 @@ from sys import getsizeof
 import shutup
 from tqdm import tqdm, trange
 shutup.please()
+import time
+t = int(1000 * time.time()) % 2**32
+np.random.seed(t)
+torch.random.manual_seed(t)
 
 
 class rainfall_generator:

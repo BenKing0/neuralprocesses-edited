@@ -42,16 +42,21 @@ class BernoulliDistribution:
 
     def __init__(self, probs):
         self.probs = probs # (*b, 1, n)
-        print(self.probs)
+        print(f'\nProb range: {float(torch.min(self.probs.flatten())):.2f} to {float(torch.max(self.probs.flatten())):.2f}')
 
     def logpdf(self, y): 
-        # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically.
+        # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically. 
+        y = torch.stack(*[y for _ in self.probs.shape[0]])
+
+        # print(f'\n y_rain: {y}')
+        # print(f'\n y_rain shape: {y.shape}, probs shape: {self.probs.shape}')
+        # print()
+
+        prob_distance = torch.sum(torch.abs(y - self.probs).flatten())
+        print(f'Total Prob distance: {prob_distance:.2f}, shape: {prob_distance.shape}\n')
 
         return B.sum(
-            torch.nan_to_num(
-                B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
-                nan=-1e5,
-            ),
+            B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
             axis=(-2, -1),
         )
                 
@@ -64,14 +69,17 @@ class GammaDistribution:
         self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
 
     def logpdf(self, y_rain, y_amount, device):
-        # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
-            
-        # nan_to_num used for when chi tends to 0 or kappa to infinity to maximise logpdf. Also when y_amount = 0 and y_rain = 0 (1), logpdf contributions should be 0 (very negative).
+        # NOTE: each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
+        # TODO: is this breaking the model?
+
+        # print(f'\n y_rain: {y_rain}')
+        # print(f'\n y_amount: {y_amount}') 
+        # print(f'\n y_rain shape: {y_rain.shape}, y_amount shape: {y_amount.shape}, kappa shape: {self.kappa.shape}, chi shape: {self.chi.shape}')
+        # print()
+
+        # TODO: use nan_to_num for when chi tends to 0 or kappa to infinity to maximise logpdf. Also when y_amount = 0 and y_rain = 0 (1), prob contributions should be 0 (very negative logpdf).
         return B.sum(
-            torch.nan_to_num(
-                ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device))) * y_rain,
-                nan=-1e5,
-            ),
+            ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device))) * y_rain,
             axis=(-2, -1),
         )
 
@@ -91,13 +99,15 @@ class BernoulliGammaDist:
         ys = [el for el in ys]
         ys = torch.stack(ys)
         ys = torch.tensor(ys, dtype=torch.float32)
-        y_rain = ys[0] # (b, 1, n)
-        y_amount = ys[1] # (b, 1, n)
+        y_rain = ys[1] # (b, 1, n)
+        y_amount = ys[0] # (b, 1, n)
 
         bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
-        bernoulli_cost = bernoulli_dist.logpdf(y_rain)
+        bernoulli_cost = bernoulli_dist.logpdf(y=y_rain)
         gamma_dist = GammaDistribution(self.z_gamma) 
-        gamma_cost = gamma_dist.logpdf(y_amount, y_rain, self.device)
+        gamma_cost = 0 * gamma_dist.logpdf(y_amount=y_amount, y_rain=y_rain, device=self.device)
+
+        print(f'Mean Bernoulli cost: {torch.mean(bernoulli_cost.flatten()):.2f}, Mean Gamma cost: {torch.mean(gamma_cost.flatten()):.2f}\n')
 
         return torch.tensor(bernoulli_cost + gamma_cost, dtype=torch.float32) # (*b,) = (num_samples, num_batches)
 
@@ -610,7 +620,7 @@ if __name__ == '__main__':
         "type": "combined", # NOTE: 'seperate' is not yet operational
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'Rainfall',
+        "model": 'rainfall',
         "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_y": 1, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_lv": 16, # TODO: is high LV dim detramental?
@@ -620,7 +630,7 @@ if __name__ == '__main__':
         "epochs": 30,
         "train_test": None,
         "evaluate": False,
-        "rate": 1e-3, # 3e-4,
+        "rate": 3e-4,
         "evaluate_last": False,
         "evaluate_num_samples": 20,
         "num_samples": 20, 

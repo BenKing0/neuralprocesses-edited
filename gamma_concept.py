@@ -20,24 +20,24 @@ class GammaDistribution:
         self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
         self.device = device
 
+        print(f'\nKappa range: {torch.min(self.kappa.flatten()):.2f} to {torch.max(self.kappa.flatten()):.2f}')
+        print(f'Chi range: {torch.min(self.chi.flatten()):.2f} to {torch.max(self.chi.flatten()):.2f}\n')
+
     def logpdf(self, y_amount):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         return B.sum(
-            torch.nan_to_num(
-                (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)),
-                nan=-1e5,
-            ),
+            (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)),
             axis=(-2, -1),
         )
 
 
-def construct_gamma_model(  
+def construct_gamma_model(
     dim_x = 1, 
     dim_y = 1, 
     dim_lv = 16,
     lv_likelihood = 'lowrank',
-    discretisation = 16,
+    discretisation = 1,
     device='cpu',
     ):
 
@@ -351,7 +351,7 @@ if __name__ == '__main__':
         "plot_num_samples": 1,
         "fix_noise": True, # NOTE: Not implemented
         "batch_size": 16,
-        "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
+        "discretisation": 1, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
         "nc_bounds": [80, 100],
         "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases

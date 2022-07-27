@@ -57,17 +57,17 @@ def rainfall_plotter(
     # Plot the Heatmap with generated precipitation predictions over gridded inputs, with or without the true precipitation next to it for comparison
     if reference:
         _, (ax1, ax2) = plt.subplots(1, 2, sharex = True, sharey = True, figsize = (10,20))
-        plot1 = ax1.imshow(hmap_rain, cmap='Pastel2', alpha=0.5, vmin=0, vmax=np.max(B.to_numpy(batch['reference'][0])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
+        plot1 = ax1.imshow(hmap_rain, cmap='plasma', alpha=0.5, vmin=0, vmax=np.max(B.to_numpy(batch['reference'][0])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
         ax1.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.1)
         ax1.set_title(f'Model Predicted Rainfall')
-        plot2 = ax2.imshow(batch['reference'][0], alpha = 0.5, cmap='Pastel2', vmin=0, vmax=np.max(B.to_numpy(batch['reference'][0])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
+        plot2 = ax2.imshow(batch['reference'][0], alpha = 0.5, cmap='plasma', vmin=0, vmax=np.max(B.to_numpy(batch['reference'][0])), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
         ax2.set_title(f'True Rainfall')
         plt.colorbar(plot1, ax=ax1, shrink=0.15)
         plt.colorbar(plot2, ax=ax2, shrink=0.15)
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
         plt.close()
     else:
-        plt.imshow(hmap_rain, cmap='Pastel2', alpha=0.5, vmin=0)
+        plt.imshow(hmap_rain, cmap='plasma', alpha=0.5, vmin=0)
         plt.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.1)
         plt.colorbar()
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)

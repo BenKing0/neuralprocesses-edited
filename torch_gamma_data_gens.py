@@ -41,16 +41,17 @@ class gp_example:
 
     def _construct_gp_sample(self, xs, ref_xs, gram):
 
+        # gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
         gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
 
         if self.reference:
             concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
             out = gp_sample(concatenated)
             ys, ref_ys = out[:len(xs)], out[len(xs):]
-            return xs, np.abs(ys), np.abs(ref_ys)
+            return xs, B.softplus(ys), B.softplus(ref_ys)
         
         else:
-            return xs, np.abs(gp_sample(xs)), None
+            return xs, B.softplus(gp_sample(xs)), None
 
 
     def _sub_batch(self, gram, nc, nt, xrange, dim_x):
