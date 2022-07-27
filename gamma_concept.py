@@ -1,7 +1,6 @@
 import numpy as np
 import lab.torch as B
 import torch
-from scipy.special import gamma
 import neuralprocesses.torch as nps
 from plum import convert
 from functools import partial
@@ -10,24 +9,24 @@ import wbml.out as out
 from torch_gamma_data_gens import gp_example
 from torch_gamma_plotting import plot_1d, plot_2d
 import experiment as exp
-from scipy.stats import loggamma
 
 
 class GammaDistribution:
 
     def __init__(self, params, device):
-        self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
-        self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
+        self.kappa = torch.ones(params[..., 0:1, :].shape) + params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n). NOTE: if 0 <= kappa <=1 then logpdf maximised with y=0. Else minimised.
+        self.chi = B.log(1e-3 + B.exp(params[..., 1:2, :])) # shape (*b, c=2, n) -> (*b, 1, n). NOTE: banded from 0 (is never == 0).
         self.device = device
 
         print(f'\nKappa range: {torch.min(self.kappa.flatten()):.2f} to {torch.max(self.kappa.flatten()):.2f}')
+        # TODO: kappa is going to 0 to make the mean of the dist (kappa / chi) tend to 0
         print(f'Chi range: {torch.min(self.chi.flatten()):.2f} to {torch.max(self.chi.flatten()):.2f}\n')
 
     def logpdf(self, y_amount):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
         return B.sum(
-            (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(self.device)),
+            (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa),
             axis=(-2, -1),
         )
 

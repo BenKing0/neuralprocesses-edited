@@ -48,10 +48,10 @@ class gp_example:
             concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
             out = gp_sample(concatenated)
             ys, ref_ys = out[:len(xs)], out[len(xs):]
-            return xs, B.softplus(ys), B.softplus(ref_ys)
+            return xs, B.exp(ys), B.exp(ref_ys)
         
         else:
-            return xs, B.softplus(gp_sample(xs)), None
+            return xs, B.exp(gp_sample(xs)), None
 
 
     def _sub_batch(self, gram, nc, nt, xrange, dim_x):

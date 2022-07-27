@@ -19,7 +19,6 @@ from functools import partial
 from wbml.experiment import WorkingDirectory
 from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic
 from Rainfall_plotting import rainfall_plotter
-from scipy.special import gamma
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
 shutup.please()
@@ -77,9 +76,8 @@ class GammaDistribution:
         # print(f'\n y_rain shape: {y_rain.shape}, y_amount shape: {y_amount.shape}, kappa shape: {self.kappa.shape}, chi shape: {self.chi.shape}')
         # print()
 
-        # TODO: use nan_to_num for when chi tends to 0 or kappa to infinity to maximise logpdf. Also when y_amount = 0 and y_rain = 0 (1), prob contributions should be 0 (very negative logpdf).
         return B.sum(
-            ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.log(torch.tensor(gamma(self.kappa.detach().cpu().numpy())).to(device))) * y_rain,
+            ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa)) * y_rain,
             axis=(-2, -1),
         )
 
