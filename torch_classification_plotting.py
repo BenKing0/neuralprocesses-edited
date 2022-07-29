@@ -132,12 +132,17 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         hmap_probs = np.mean(hmap_probs_multi, axis=0)
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
-        _, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
+        ref_xs, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
         ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
+        ref_probs = []
+        for _ in range(num_samples):
+            _, ref_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, ref_xs))
+            ref_probs.append(ref_dist.probs[0][hmap_class])
 
-        memberships = np.where(hmap_probs>0.5, 1, 0)
-        correct = np.where(memberships==ref_ys, 1, 0)
+        memberships = np.where(np.mean(ref_probs, axis=0) > 0.5, 1., 0.)
+        correct = np.where(memberships==ref_ys.flatten(), 1, 0)
         accuracy = np.sum(correct.flatten()) / len(correct.flatten())
+        print(correct)
 
         sns.set_theme()
         _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
