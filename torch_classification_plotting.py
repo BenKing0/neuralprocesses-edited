@@ -104,7 +104,7 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
     with B.on_device(device):
 
         epoch = gen.epoch()
-        batch = epoch[0]    
+        batch = epoch[0]
 
         with torch.no_grad():
             state, dist = model(state, batch['xc'], batch['yc'], batch['xt']) 
@@ -135,6 +135,10 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         _, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
         ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
 
+        memberships = np.where(hmap_probs>0.5, 1, 0)
+        correct = np.where(memberships==ref_ys, 1, 0)
+        accuracy = np.sum(correct.flatten()) / len(correct.flatten())
+
         sns.set_theme()
         _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
         plot1 = ax1.imshow(hmap_probs, vmin=-0.1, vmax=1.1, cmap='RdYlBu', extent=[min(hmap_X[0, 0]), max(hmap_X[0, 0]), min(hmap_X[0, 1]), max(hmap_X[0, 1])], alpha=0.4)  
@@ -144,8 +148,8 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         markers = itertools.cycle(('.', '.', 'o', '+', '*'))
         for class_, _ in groups:
             x = x_dict[class_]
-            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', label=f'{class_} True', s=0.5)
-        # ax1.legend()
+            ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', s=0.5)
+        ax1.text(5, 5, f'Accuracy: {accuracy:.2d}')
         if B.max(memberships) == 1:
             ax1.set_title('Colormap scaled by class 1')
         else:
