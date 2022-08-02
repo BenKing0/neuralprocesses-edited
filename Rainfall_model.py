@@ -17,11 +17,13 @@ import numpy as np
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic
+from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic, bernoulli_only
 from Rainfall_plotting import rainfall_plotter
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
 shutup.please()
+
+# TODO: The issue is that the parameters are not being updated correctly!
 
 
 # `Aggregate` outputs are assumed to always come with `AggregateInput` inputs.
@@ -46,10 +48,12 @@ class BernoulliDistribution:
         # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically. 
         # y = torch.stack(*[y for _ in self.probs.shape[0]])
 
-        return torch.nan_to_num(B.sum(
+        print(f'Proportion 1s: {torch.sum(y) / torch.sum(torch.ones(y.shape)):.2f}')
+
+        return B.sum(
             B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
             axis=(-2, -1),
-        ), nan=0.)
+        )
                 
 
 class GammaDistribution:
@@ -64,6 +68,7 @@ class GammaDistribution:
         print(f'Kappa range: {torch.min(self.kappa.flatten()):.2f} to {torch.max(self.kappa.flatten()):.2f}')
         print(f'Chi range: {torch.min(self.chi.flatten()):.2f} to {torch.max(self.chi.flatten()):.2f}\n')
 
+        # TODO: what makes the gamma cost nan? Not the factors above!
         return B.sum(
             ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa)) * y_rain,
             axis=(-2, -1),
@@ -92,7 +97,7 @@ class BernoulliGammaDist:
         bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
         bernoulli_cost = bernoulli_dist.logpdf(y=y_rain)
         gamma_dist = GammaDistribution(self.z_gamma, device=self.device) 
-        gamma_cost = gamma_dist.logpdf(y_amount=y_amount, y_rain=y_rain)
+        gamma_cost = 0*gamma_dist.logpdf(y_amount=y_amount, y_rain=y_rain)
 
         print(f'Mean Bernoulli cost: {torch.mean(bernoulli_cost.flatten()):.2f}, Mean Gamma cost: {torch.mean(gamma_cost.flatten()):.2f}\n')
 
@@ -190,179 +195,6 @@ class combined:
         return model
 
 
-class separate:
-
-    @classmethod
-    def _bernoulli_model( 
-        cls, 
-        dim_x = 2, 
-        dim_lv = 16,
-        lv_likelihood = 'lowrank',
-        discretisation = 1,
-        ):
-        """
-        Bernoulli likelihood part of the model which decides whether it is raining or not (binary).
-        """
-        dim_y = 1
-
-        if dim_lv > 0:
-            if lv_likelihood == 'het':
-                encoder_likelihood = nps.HeterogeneousGaussianLikelihood()
-                out_channels = 2 * dim_lv
-            elif lv_likelihood == 'lowrank':
-                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
-                out_channels = (2 + 64) * dim_lv
-            else:
-                print(f'Non-implemented likelihood passed ({lv_likelihood} is not in "het" or "lowrank"), defaulting to "lowrank" for Correlated LV model.')
-                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
-                out_channels = (2 + 64) * dim_lv
-        else:
-            encoder_likelihood = nps.DeterministicLikelihood()
-            unet_latent_variable = lambda x: x
-
-
-        # CNN architecture:
-        ##TODO: finish making dim_lv = 0 capable
-        decoder_channels = (32,) * 6
-        encoder_channels = (32,) * 6
-        if dim_lv > 0:
-            unet_latent_variable = nps.UNet(
-                dim=dim_x,
-                in_channels=2,
-                out_channels=out_channels,    ## ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
-                channels=encoder_channels,
-            )
-            
-            unet = nps.UNet(
-                dim=dim_x,
-                in_channels=dim_lv,
-                out_channels=1, ## 1 per output dimension as Bernoulli has a single sufficient statistic
-                channels=decoder_channels,
-            )
-
-        else:
-            dim_yc = convert(dim_y, tuple)
-            unet = nps.UNet(
-                dim=dim_x,
-                in_channels = sum(dim_yc) + len(dim_yc),
-                out_channels=1, ## 1 per output dimension as Bernoulli has a single sufficient statistic
-                channels=decoder_channels,
-            )
-
-        # Discretisation of the functional embedding:
-        disc = nps.Discretisation(
-            points_per_unit=discretisation,
-            multiple=2**unet.num_halving_layers,
-            margin=0.1,
-            dim=dim_x,
-        )
-
-        # Create the encoder and decoder and construct the model.
-        encoder = nps.FunctionalCoder(
-            disc,
-            nps.Chain(
-                nps.PrependDensityChannel(),
-                nps.SetConv(scale=1 / disc.points_per_unit),
-                nps.DivideByFirstChannel(),
-                unet_latent_variable,
-                encoder_likelihood,
-            ),
-        )
-        decoder = nps.Chain(
-            unet,
-            nps.SetConv(scale=1 / disc.points_per_unit),
-            lambda z: BernoulliDistribution(B.sigmoid(z)), 
-        )
-        model = nps.Model(encoder, decoder)
-
-        return model
-
-    @classmethod
-    def _gamma_model(
-        cls,
-        dim_x = 2, 
-        dim_lv = 16,
-        lv_likelihood = 'lowrank',
-        discretisation = 16,
-        ):
-        '''
-        Gamma model which takes in 2d coordinates and returns the shape and scale parameters from a Gamma distribution, kappa and lambda, respectively.
-        Inputs only passed to this model if the Bernoulli model output is rho > 0.5.
-        '''
-        dim_y = 2 # this is kappa and lambda from gamma distribution
-
-        if dim_lv > 0:
-            if lv_likelihood == 'het':
-                encoder_likelihood = nps.HeterogeneousGaussianLikelihood()
-                out_channels = 2 * dim_lv
-            elif lv_likelihood == 'lowrank':
-                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
-                out_channels = (2 + 64) * dim_lv
-            else:
-                print(f'Non-implemented likelihood passed ({lv_likelihood} is not in "het" or "lowrank"), defaulting to "lowrank" for Correlated LV model.')
-                encoder_likelihood = nps.LowRankGaussianLikelihood(64)
-                out_channels = (2 + 64) * dim_lv
-        else:
-            encoder_likelihood = nps.DeterministicLikelihood()
-            unet_latent_variable = lambda x: x
-
-
-        # CNN architecture:
-        ##TODO: finish making dim_lv = 0 capable
-        decoder_channels = (32,) * 6
-        encoder_channels = (32,) * 6
-        if dim_lv > 0:
-            unet_latent_variable = nps.UNet(
-                dim=dim_x,
-                in_channels=2,
-                out_channels=out_channels,    ## ensure correct rank - this is 'num_channels' in likelihood definition and differs depending on encoder likelihood
-                channels=encoder_channels,
-            )
-            
-            unet = nps.UNet(
-                dim=dim_x,
-                in_channels=dim_lv,
-                out_channels=2, ## 2 per output dimension as Gamma has two sufficient statistics
-                channels=decoder_channels,
-            )
-
-        else:
-            dim_yc = convert(dim_y, tuple)
-            unet = nps.UNet(
-                dim=dim_x,
-                in_channels = sum(dim_yc) + len(dim_yc),
-                out_channels=2, ## 2 per output dimension as Gamma has two sufficient statistics
-                channels=decoder_channels,
-            )
-
-        # Discretisation of the functional embedding:
-        disc = nps.Discretisation(
-            points_per_unit=discretisation,
-            multiple=2**unet.num_halving_layers,
-            margin=0.1,
-            dim=dim_x,
-        )
-
-        # Create the encoder and decoder and construct the model.
-        encoder = nps.FunctionalCoder(
-            disc,
-            nps.Chain(
-                nps.PrependDensityChannel(),
-                nps.SetConv(scale=1 / disc.points_per_unit),
-                nps.DivideByFirstChannel(),
-                unet_latent_variable,
-                encoder_likelihood,
-            ),
-        )
-        decoder = nps.Chain(
-            unet,
-            nps.SetConv(scale=1 / disc.points_per_unit),
-            lambda z: GammaDistribution(B.relu(z[0]), B.relu(z[1])), # NOTE: (2, n) shape output from nps.SetConv()?
-        )
-
-        model = nps.Model(encoder, decoder)
-        return model
-
     @classmethod
     def construct_model(
         cls,
@@ -447,6 +279,12 @@ def main(config, _config):
                 rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True, device=device),
                 rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
                 rainfall_generator(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
+                ]
+    elif config.data == 'bernoulli_only':               
+            gen_train, gen_cv, gens_eval = [    
+                bernoulli_only(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True, device=device),
+                bernoulli_only(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
+                bernoulli_only(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
                 ]
     else:
         gen_train, gen_cv, gens_eval = [    
@@ -612,7 +450,7 @@ if __name__ == '__main__':
         "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_y": 1, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_lv": 16, # TODO: is high LV dim detramental?
-        "data": 'synthetic',
+        "data": 'bernoulli_only',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 100,
@@ -624,13 +462,13 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 16,
+        "num_batches": 1,
         "discretisation": 1,
         "encoder_channels": 32,
         "decoder_channels": 32,
         "num_layers": 6,
-        "nc_bounds": [80, 100],
-        "nt_bounds": [40, 50],
+        "nc_bounds": [160, 200],
+        "nt_bounds": [80, 100],
         ## number of training/validation/evaluation points per epoch not implemented, instead gives number of points per batch (approx. 100) * num_batches points for all three cases
     }
 
