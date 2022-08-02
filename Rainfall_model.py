@@ -36,7 +36,6 @@ def _merge_context_target(contexts: List, xt: B.Numeric, yt: base.Aggregate):
     )
 
 
-# TODO: why are probabilities 'clumping'? (stay v similar to initialised value as if backprop not effective)
 class BernoulliDistribution:
 
     def __init__(self, probs):
@@ -45,36 +44,25 @@ class BernoulliDistribution:
 
     def logpdf(self, y): 
         # NOTE: y of shape (b, 1, n) as constant across samples so no sample dimension. Broadcasting stretches copies of y to same shape automatically. 
-        y = torch.stack(*[y for _ in self.probs.shape[0]])
+        # y = torch.stack(*[y for _ in self.probs.shape[0]])
 
-        # print(f'\n y_rain: {y}')
-        # print(f'\n y_rain shape: {y.shape}, probs shape: {self.probs.shape}')
-        # print()
-
-        prob_distance = torch.sum(torch.abs(y - self.probs).flatten())
-        print(f'Total Prob distance: {prob_distance:.2f}, shape: {prob_distance.shape}\n')
-
-        return B.sum(
+        return torch.nan_to_num(B.sum(
             B.log(self.probs) * y + B.log(1 - self.probs) * (1 - y),
             axis=(-2, -1),
-        )
+        ), nan=0.)
                 
 
-# TODO: also clumping with chis and kappas
 class GammaDistribution:
 
-    def __init__(self, params):
-        self.kappa = params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
-        self.chi = params[..., 1:2, :] # shape (*b, c=2, n) -> (*b, 1, n)
+    def __init__(self, params, device):
+        self.kappa = torch.ones(params[..., 0:1, :].shape).to(device) + params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n)
+        self.chi = B.log(1e-3 + B.exp(params[..., 1:2, :])) # shape (*b, c=2, n) -> (*b, 1, n)
 
-    def logpdf(self, y_rain, y_amount, device):
+    def logpdf(self, y_rain, y_amount):
         # NOTE: each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
-        # TODO: is this breaking the model?
 
-        # print(f'\n y_rain: {y_rain}')
-        # print(f'\n y_amount: {y_amount}') 
-        # print(f'\n y_rain shape: {y_rain.shape}, y_amount shape: {y_amount.shape}, kappa shape: {self.kappa.shape}, chi shape: {self.chi.shape}')
-        # print()
+        print(f'Kappa range: {torch.min(self.kappa.flatten()):.2f} to {torch.max(self.kappa.flatten()):.2f}')
+        print(f'Chi range: {torch.min(self.chi.flatten()):.2f} to {torch.max(self.chi.flatten()):.2f}\n')
 
         return B.sum(
             ((self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa)) * y_rain,
@@ -94,16 +82,15 @@ class BernoulliGammaDist:
     def logpdf(self, ys):
 
         # Next 3 lines unaggregate the Aggregate ys into a stack of torch tensors via a list (of shape (*b, 2, n))
-        ys = [el for el in ys]
-        ys = torch.stack(ys)
+        ys = torch.stack([el for el in ys])
         ys = torch.tensor(ys, dtype=torch.float32)
-        y_rain = ys[1] # (b, 1, n)
-        y_amount = ys[0] # (b, 1, n)
+        y_rain = ys[0] # (b, 1, n)
+        y_amount = ys[1] # (b, 1, n)
 
         bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
         bernoulli_cost = bernoulli_dist.logpdf(y=y_rain)
-        gamma_dist = GammaDistribution(self.z_gamma) 
-        gamma_cost = 0 * gamma_dist.logpdf(y_amount=y_amount, y_rain=y_rain, device=self.device)
+        gamma_dist = GammaDistribution(self.z_gamma, device=self.device) 
+        gamma_cost = gamma_dist.logpdf(y_amount=y_amount, y_rain=y_rain)
 
         print(f'Mean Bernoulli cost: {torch.mean(bernoulli_cost.flatten()):.2f}, Mean Gamma cost: {torch.mean(gamma_cost.flatten()):.2f}\n')
 
@@ -398,8 +385,8 @@ def train(state, model, opt, objective, gen, *, epoch):
         if i == 0: print('data gen device:', B.device(batch['xc']))
         # must all be of shape (*b, c, n) where c=2 for both yc(t) and xc(t), and c=1 for yc(t)_bernoulli(precip)
         xc = batch['xc']
-        yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :]
-        yt_bernoulli, yt_precip = batch['yt'][..., 0:1, :], batch['yt'][..., 1:2, :]
+        yc_bernoulli, yc_precip = batch['yc'][..., 1:2, :], batch['yc'][..., 0:1, :]
+        yt_bernoulli, yt_precip = batch['yt'][..., 1:2, :], batch['yt'][..., 0:1, :]
         # print(xc.shape, yc_bernoulli.shape, yc_precip.shape) # tick
         obj = objective(
                 model,
@@ -424,7 +411,7 @@ def eval(state, model, objective, gen):
         batches = gen.epoch()
         for batch in batches:
             xc = batch['xc']
-            yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :]
+            yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :] # TODO: context sets wrong way round!
             yt_bernoulli, yt_precip = batch['yt'][..., 0:1, :], batch['yt'][..., 1:2, :]
             obj = objective(
                     model,
@@ -634,7 +621,7 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 1,
+        "num_batches": 4,
         "discretisation": 2,
         "encoder_channels": 32,
         "decoder_channels": 32,
