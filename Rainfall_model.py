@@ -87,6 +87,8 @@ class BernoulliGammaDist:
         y_rain = ys[0] # (b, 1, n)
         y_amount = ys[1] # (b, 1, n)
 
+        assert len(torch.unique(y_rain.flatten())) == 2
+
         bernoulli_dist = BernoulliDistribution(self.bernoulli_prob)
         bernoulli_cost = bernoulli_dist.logpdf(y=y_rain)
         gamma_dist = GammaDistribution(self.z_gamma, device=self.device) 
@@ -387,7 +389,7 @@ def train(state, model, opt, objective, gen, *, epoch):
         xc = batch['xc']
         yc_bernoulli, yc_precip = batch['yc'][..., 1:2, :], batch['yc'][..., 0:1, :]
         yt_bernoulli, yt_precip = batch['yt'][..., 1:2, :], batch['yt'][..., 0:1, :]
-        # print(xc.shape, yc_bernoulli.shape, yc_precip.shape) # tick
+        assert len(torch.unique(yc_bernoulli.flatten())) == 2
         obj = objective(
                 model,
                 [(xc, yc_bernoulli), (xc, yc_precip)],
@@ -411,8 +413,9 @@ def eval(state, model, objective, gen):
         batches = gen.epoch()
         for batch in batches:
             xc = batch['xc']
-            yc_bernoulli, yc_precip = batch['yc'][..., 0:1, :], batch['yc'][..., 1:2, :] # TODO: context sets wrong way round!
-            yt_bernoulli, yt_precip = batch['yt'][..., 0:1, :], batch['yt'][..., 1:2, :]
+            yc_bernoulli, yc_precip = batch['yc'][..., 1:2, :], batch['yc'][..., 0:1, :]
+            yt_bernoulli, yt_precip = batch['yt'][..., 1:2, :], batch['yt'][..., 0:1, :]
+            assert len(torch.unique(yc_bernoulli.flatten())) == 2
             obj = objective(
                     model,
                     [(xc, yc_bernoulli), (xc, yc_precip)],
@@ -612,17 +615,17 @@ if __name__ == '__main__':
         "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 30,
+        "epochs": 100,
         "train_test": None,
         "evaluate": False,
-        "rate": 3e-4,
+        "rate": 1e-3,
         "evaluate_last": False,
         "evaluate_num_samples": 20,
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 4,
-        "discretisation": 2,
+        "num_batches": 16,
+        "discretisation": 1,
         "encoder_channels": 32,
         "decoder_channels": 32,
         "num_layers": 6,
