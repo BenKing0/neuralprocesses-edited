@@ -148,7 +148,8 @@ class Bernoulli_Gamma_synthetic:
 
 
     def _construct_gp_sample(self, xs, gram):
-        gp_sample = lambda x: np.random.multivariate_normal(self.gp_mean * np.ones(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
+        # gp_sample = lambda x: np.random.multivariate_normal(self.gp_mean * np.ones(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
+        gp_sample = lambda x: np.array([1 if xi[0] > xi[1] else 0 for xi in x])
         return xs, gp_sample(xs)
 
     
@@ -156,8 +157,7 @@ class Bernoulli_Gamma_synthetic:
         '''
         If gp_sample < 0: y = 0. If gp_sample > 0: y = gp_sample
         '''
-        _med = median(gp_sample)
-        _sliced = list(map(lambda x,y: [x, 0. if y < _med else y], xs, gp_sample))
+        _sliced = list(map(lambda x,y: [x, 0. if y < 0. else y], xs, gp_sample))
         xs, ys = list(zip(*_sliced))
         return xs, ys
 
@@ -236,7 +236,115 @@ class Bernoulli_Gamma_synthetic:
         return epoch
 
 
-# TODO: not changes since batch dimensions altered!
+class bernoulli_only:
+
+    
+    def __init__(self, dim_x=2, xrange=[[0, 0], [60, 60]], batch_size=16, num_batches=1, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', device='cpu', reference=False):
+
+        self.dim_x = dim_x
+        self.xrange = xrange
+        self.num_batches = num_batches
+        self.batch_size = batch_size
+        self.kernel = kernel
+        self.nc_bounds = nc_bounds
+        self.nt_bounds = nt_bounds
+        self.device = device
+        self.reference = reference
+
+        l = (B.max(np.array(xrange[1])) - B.min(np.array(xrange[0]))) / 2 # this should be reflective of xrange!
+        if kernel == 'eq': 
+            f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
+        else: 
+            print(f'Have not implemented {kernel} kernel, defaulting to EQ')
+            f = lambda x1, x2: B.exp(- np.dot((x1 - x2), (x1-x2)) / (2*l))
+        self.gram = lambda x: [[f(x1, x2) for x1 in x] for x2 in x]
+
+
+    def _construct_gp_sample(self, xs, ref_xs, gram):
+
+        gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
+
+        if self.reference:
+            concatenated = np.concatenate((xs, ref_xs), axis=0) # xs and ref_xs have shape (n, dim_x) here
+            out = gp_sample(concatenated)
+            ys, ref_ys = out[:len(xs)], out[len(xs):]
+            return xs, ys, ref_ys
+        
+        else:
+            return xs, gp_sample(xs), None
+
+    
+    def _cutoff(self, xs, gp_sample):
+
+        _sliced = list(map(lambda x,y: [x, float(y < 0)], xs, gp_sample))
+        xs, ys = list(zip(*_sliced))
+        ys = list(zip([1]*len(ys), ys))
+        return xs, ys
+
+
+    def _sub_batch(self, gram, nc, nt, xrange, dim_x):
+
+        xs = np.random.uniform(low=xrange[0], high=xrange[1], size=(int(nc+nt), dim_x))
+        ref_xs = np.array(np.meshgrid(*[np.linspace(i, j, 30) for i, j in zip(xrange[0], xrange[1])])).reshape(dim_x, -1).T
+        xs, gp_sample, ref_sample = self._construct_gp_sample(xs, ref_xs, gram)
+        xs, ys = self._cutoff(xs, gp_sample)
+
+        if self.reference:
+            ref_xs, ref_ys = self._cutoff(ref_xs, ref_sample)
+            ref = np.array(ref_ys)[:, 1].reshape(30, 30)
+        else:
+            ref = None
+
+        zipped = list(zip(xs, ys))
+        random.shuffle(zipped)
+        contexts, targets = zipped[:nc], zipped[nc:]
+
+        xc, yc = list(zip(*contexts))
+        xt, yt = list(zip(*targets))
+        return xc, yc, xt, yt, ref
+
+
+    def epoch(self):
+
+        epoch = []
+        for _ in range(self.num_batches):
+
+            def _convert_data(points):
+                _xc, _yc, _xt, _yt, ref = points
+                xc = B.transpose(torch.tensor(np.array(_xc), dtype=torch.float32)) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
+                xt = B.transpose(torch.tensor(np.array(_xt), dtype=torch.float32))
+                yc = B.transpose(torch.tensor(np.array(_yc), dtype=torch.float32))
+                yt = B.transpose(torch.tensor(np.array(_yt), dtype=torch.float32))
+                return xc, yc, xt, yt, ref
+
+            nc = random.randint(*self.nc_bounds)
+            nt = random.randint(*self.nt_bounds)
+
+            xc, yc, xt, yt, reference = [], [], [], [], []       
+            for _ in trange(self.batch_size):
+
+                _points = self._sub_batch(self.gram, nc, nt, self.xrange, self.dim_x)
+                sub_xc, sub_yc, sub_xt, sub_yt, sub_reference = _convert_data(_points)
+
+                xc.append(sub_xc)
+                yc.append(sub_yc)
+                xt.append(sub_xt)
+                yt.append(sub_yt)
+                reference.append(sub_reference)
+
+            batch = {
+                'xc': torch.stack(xc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }
+            epoch.append(batch)
+
+        return epoch   
+
+
+
 if __name__ == '__main__':
 
     synthetic = Bernoulli_Gamma_synthetic(

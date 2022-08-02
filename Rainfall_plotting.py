@@ -32,7 +32,7 @@ def rainfall_plotter(
     hmap_x2 = np.linspace(ybounds[0], ybounds[1], num)
     hmap_X = np.meshgrid(hmap_x1, hmap_x2)
     hmap_X = np.array(hmap_X).reshape((1, 2, num**2)) # (2, num, num) = (coords, xs, ys) to (1, 2, num^2)
-    yc_bernoulli, yc_precip = batch['yc'][0:1, 0:1, :], batch['yc'][0:1, 1:2, :] # (b, 2, n) to (1, 1, n) each
+    yc_bernoulli, yc_precip = batch['yc'][0:1, 1:2, :], batch['yc'][0:1, 0:1, :] # (b, 2, n) to (1, 1, n) each
     yc_bernoulli, yc_precip = yc_bernoulli.reshape(1, 1, -1), yc_precip.reshape(1, 1, -1)
     xc = batch['xc'][0:1] # (b, 2, n) to (1, 2, n)
 
@@ -48,7 +48,7 @@ def rainfall_plotter(
     hmap_rain = np.zeros(hmap_bernoulli.shape[-1])
     for i, (kappa_i, chi_i, bern_i) in enumerate(zip(hmap_kappa.reshape(-1), hmap_chi.reshape(-1), hmap_bernoulli.reshape(-1))):
         if bern_i > 0.5:
-            sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=chi_i.detach().cpu().numpy(), size=num_samples))
+            sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=1/chi_i.detach().cpu().numpy(), size=num_samples))
             hmap_rain[i] = sample_i
         else:
             hmap_rain[i] = 0
