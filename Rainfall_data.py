@@ -9,6 +9,7 @@ import pandas as pd
 from sys import getsizeof
 import shutup
 from tqdm import tqdm, trange
+from scipy.stats import multivariate_normal as norm
 shutup.please()
 import time
 t = int(1000 * time.time()) % 2**32
@@ -236,7 +237,7 @@ class Bernoulli_Gamma_synthetic:
         return epoch
 
 
-class bernoulli_only:
+class bernoulli_only_GP:
 
     
     def __init__(self, dim_x=2, xrange=[[0, 0], [60, 60]], batch_size=16, num_batches=1, nc_bounds=[10, 20], nt_bounds=[10, 20], kernel='eq', device='cpu', reference=False):
@@ -342,6 +343,110 @@ class bernoulli_only:
             epoch.append(batch)
 
         return epoch   
+
+
+class bernoulli_only_MoG:
+
+    def __init__(self, means, covariances, num_batches = 1, batch_size = 16, dim_x: int = 2, nc_bounds: list = [10, 20], nt_bounds: list = [10, 20], priors: list = [0.5, 0.5], device='cpu'):
+
+        self.num_batches = num_batches
+        self.means = means
+        self.covariances = covariances
+        if not dim_x:
+            try:
+                dim_x = len(means[0])
+            except:
+                dim_x = 1
+        self.dim_x = dim_x
+        self.nc_bounds = nc_bounds
+        self.nt_bounds = nt_bounds
+        self.priors = priors
+        self.num_classes = len(priors)
+        self.device = device
+        self.batch_size = batch_size
+
+
+    def epoch(self):
+
+        def convert_data(points):
+            _xc, _yc, _xt, _yt, reference = points
+            xc = B.transpose(_xc) ## B.transpose defaults to switching the last 2 axes: (n, c) => (c, n)
+            xt = B.transpose(_xt)
+            yc = B.transpose(_yc)
+            yt = B.transpose(_yt)
+            return xc, yc, xt, yt, reference
+
+        epoch = []        
+        nc = B.squeeze(torch.randint(low=self.nc_bounds[0], high=self.nc_bounds[1]+1, size=(1, )))
+        nt = B.squeeze(torch.randint(low=self.nt_bounds[0], high=self.nt_bounds[1]+1, size=(1,)))
+
+        for _ in range(self.num_batches):
+
+            xc, yc, xt, yt, reference = [], [], [], [], []
+            for _ in range(self.batch_size):
+
+                _means = []
+                _covars = []
+                for i, mean in enumerate(self.means):
+                    _mean = torch.tensor(mean).clone().to(self.device)
+                    _covar = torch.tensor(self.covariances[i]).clone().to(self.device)
+                    _means.append(_mean + B.random.randn(torch.float32, *_mean.shape) * B.max(B.abs(_mean)))
+                    _cov_perturbation = B.random.randn(torch.float32, *_covar.shape)
+                    _covars.append(_covar + 1 * B.abs(_cov_perturbation * B.transpose(_cov_perturbation))) ## make PSD for all random matrices
+                    
+                _points = self._sub_batch(_means, _covars, self.dim_x, nc, nt, self.priors)
+                sub_xc, sub_yc, sub_xt, sub_yt, sub_reference = convert_data(_points)
+
+                xc.append(sub_xc)
+                yc.append(sub_yc)
+                xt.append(sub_xt)
+                yt.append(sub_yt)
+                reference.append(sub_reference)
+
+            batch = {
+                'xc': torch.stack(xc).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }    
+            epoch.append(batch)
+
+        return epoch   
+
+
+    def _sub_batch(self, means, covariances, dim_x, nc, nt, priors):
+        
+        num_points = nc + nt
+        ys = []
+        for i in range(self.num_classes):
+            ys.extend([[1, i]] * int(num_points * priors[i]))
+
+        xs = []
+        for y in ys:
+            mean = torch.tensor(means[y[1]], dtype=torch.float32)
+            covar = torch.tensor(covariances[y[1]], dtype=torch.float32) 
+            
+            x = torch.distributions.MultivariateNormal(mean, covar)
+            xs.append(x.sample()) ## of shape (num_points, dim_x)
+
+        zipped = list(zip(xs, ys)) ## num_points each of form [list(x), int(y)]
+        random.shuffle(zipped)
+        contexts, targets = zipped[:nc], zipped[nc:]
+
+        xc, yc = list(zip(*contexts))
+        xt, yt = list(zip(*targets))
+
+        xs = torch.stack(xs)
+        bounds, _ = list(zip(torch.min(xs, axis=0), torch.max(xs, axis=0)))
+        temps = np.array(np.meshgrid(*[np.linspace(i, j, 30) for i, j in bounds]))
+        xref = np.dstack(temps)
+        dist1 = norm(means[0], covariances[0])
+        dist2 = norm(means[1], covariances[1])
+        yref = (priors[0] * dist1.pdf(xref)) / (priors[0] * dist1.pdf(xref) + priors[1] * dist2.pdf(xref))
+        reference = yref.reshape(*(30,)*dim_x)
+
+        return B.stack(*xc, axis=0), torch.tensor(yc, dtype=torch.float32), B.stack(*xt, axis=0), torch.tensor(yt, dtype=torch.float32), reference ## of form (n, c)
 
 
 

@@ -1,5 +1,6 @@
 from ctypes import sizeof
 import re
+# from statistics import covariance
 from neuralprocesses import aggregate
 from neuralprocesses.aggregate import Aggregate
 from neuralprocesses.disc import Discretisation
@@ -17,11 +18,16 @@ import numpy as np
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic, bernoulli_only
+from Rainfall_data import rainfall_generator, Bernoulli_Gamma_synthetic, bernoulli_only_GP, bernoulli_only_MoG
 from Rainfall_plotting import rainfall_plotter
 from typing import List
 from neuralprocesses.model.elbo import _merge_context_target
+import time
 shutup.please()
+
+t = int(time.time() * 1000) % 2**32
+torch.random.manual_seed(t)
+np.random.seed(t)
 
 # TODO: The issue is that the parameters are not being updated correctly!
 
@@ -275,23 +281,32 @@ def main(config, _config):
     batch_size = config.num_batches
 
     if config.data == 'rainfall':               
-            gen_train, gen_cv, gens_eval = [    
-                rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True, device=device),
-                rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
-                rainfall_generator(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
-                ]
-    elif config.data == 'bernoulli_only':               
-            gen_train, gen_cv, gens_eval = [    
-                bernoulli_only(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True, device=device),
-                bernoulli_only(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
-                bernoulli_only(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
-                ]
+        gen_train, gen_cv, gens_eval = [    
+            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True, device=device),
+            rainfall_generator(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
+            rainfall_generator(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, include_binary=True,  device=device),
+            ]
+    elif config.data == 'bernoulli_only_GP':               
+        gen_train, gen_cv, gens_eval = [    
+            bernoulli_only_GP(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True, device=device),
+            bernoulli_only_GP(batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
+            bernoulli_only_GP(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
+        ]
+    elif config.data == 'bernoulli_only_MoG': 
+        means = [[0, 0] , [60, 60]]
+        covariances = [5*np.eye(2), 5*np.eye(2)]
+        dim_x = 2              
+        gen_train, gen_cv, gens_eval = [    
+            bernoulli_only_MoG(means=means, covariances=covariances, dim_x=dim_x, batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device),
+            bernoulli_only_MoG(means=means, covariances=covariances, dim_x=dim_x, batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device),
+            bernoulli_only_MoG(means=means, covariances=covariances, dim_x=dim_x, batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device),
+        ]
     else:
         gen_train, gen_cv, gens_eval = [    
-                Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
-                Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
-                Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
-            ]
+            Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
+            Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=batch_size, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
+            Bernoulli_Gamma_synthetic(xrange=[0, 60], batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, device=device, kernel='eq', l=0.2, gp_mean=1, num_ref_points=30, include_binary=True),
+        ]
 
     if config.type == "combined":
         model = combined.combined_model(discretisation=1,
@@ -450,7 +465,7 @@ if __name__ == '__main__':
         "dim_x": 2, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_y": 1, # NOTE: Hard-coded, included for filename (Has to be the case for rainfall case)
         "dim_lv": 16, # TODO: is high LV dim detramental?
-        "data": 'bernoulli_only',
+        "data": 'bernoulli_only_MoG',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 100,
@@ -462,13 +477,13 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 1,
+        "num_batches": 16,
         "discretisation": 1,
         "encoder_channels": 32,
         "decoder_channels": 32,
         "num_layers": 6,
-        "nc_bounds": [160, 200],
-        "nt_bounds": [80, 100],
+        "nc_bounds": [80, 100],
+        "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points per epoch not implemented, instead gives number of points per batch (approx. 100) * num_batches points for all three cases
     }
 
