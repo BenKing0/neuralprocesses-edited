@@ -149,8 +149,7 @@ class Bernoulli_Gamma_synthetic:
 
 
     def _construct_gp_sample(self, xs, gram):
-        # gp_sample = lambda x: np.random.multivariate_normal(self.gp_mean * np.ones(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
-        gp_sample = lambda x: np.array([1 if xi[0] > xi[1] else 0 for xi in x])
+        gp_sample = lambda x: np.random.multivariate_normal(self.gp_mean * np.ones(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
         return xs, gp_sample(xs)
 
     
@@ -390,9 +389,9 @@ class bernoulli_only_MoG:
                 for i, mean in enumerate(self.means):
                     _mean = torch.tensor(mean).clone().to(self.device)
                     _covar = torch.tensor(self.covariances[i]).clone().to(self.device)
-                    _means.append(_mean + B.random.randn(torch.float32, *_mean.shape) * B.max(B.abs(_mean)))
+                    _means.append(_mean + 0.1 * B.random.randn(torch.float32, *_mean.shape) * B.max(B.abs(np.array(self.means))))
                     _cov_perturbation = B.random.randn(torch.float32, *_covar.shape)
-                    _covars.append(_covar + 1 * B.abs(_cov_perturbation * B.transpose(_cov_perturbation))) ## make PSD for all random matrices
+                    _covars.append(2 * _covar + 3 * B.abs(_cov_perturbation * B.transpose(_cov_perturbation))) ## make PSD for all random matrices
                     
                 _points = self._sub_batch(_means, _covars, self.dim_x, nc, nt, self.priors)
                 sub_xc, sub_yc, sub_xt, sub_yt, sub_reference = convert_data(_points)
@@ -415,6 +414,7 @@ class bernoulli_only_MoG:
         return epoch   
 
 
+    # TODO: reference in wrong place so plotting wrong thing - pass from _sub_batch()
     def _sub_batch(self, means, covariances, dim_x, nc, nt, priors):
         
         num_points = nc + nt
@@ -441,8 +441,8 @@ class bernoulli_only_MoG:
         bounds, _ = list(zip(torch.min(xs, axis=0), torch.max(xs, axis=0)))
         temps = np.array(np.meshgrid(*[np.linspace(i, j, 30) for i, j in bounds]))
         xref = np.dstack(temps)
-        dist1 = norm(means[0], covariances[0])
-        dist2 = norm(means[1], covariances[1])
+        dist1 = norm(B.to_numpy(means[0].cpu()), B.to_numpy(covariances[0].cpu()))
+        dist2 = norm(B.to_numpy(means[1].cpu()), B.to_numpy(covariances[1].cpu()))
         yref = (priors[0] * dist1.pdf(xref)) / (priors[0] * dist1.pdf(xref) + priors[1] * dist2.pdf(xref))
         reference = yref.reshape(*(30,)*dim_x)
 
@@ -452,35 +452,54 @@ class bernoulli_only_MoG:
 
 if __name__ == '__main__':
 
-    synthetic = Bernoulli_Gamma_synthetic(
-        xrange=[0, 20],
-        batch_size=1,
-        nc_bounds=[50, 70],
-        nt_bounds=[100, 140],
-        device='cpu',
-        kernel='eq',
-        l=0.2,
-        gp_mean=1,
-        num_ref_points=30, # cost of creaeting each batch scales with O(num_ref_points^2)
-    )
-
-    rainfall = rainfall_generator(
-        batch_size=1,
-        nc_bounds=[50, 70],
-        nt_bounds=[100, 140],
-        device='cpu',
-    )
-
+    import pandas as pd
     import matplotlib.pyplot as plt
 
-    batch = rainfall.epoch()[0]
-    print(batch['date'])
+    num_batches = 100
+    batch_size = 16
 
-    xc = batch['xc']
-    yc = batch['yc']
-    print(xc.shape, yc.shape)
-    print(batch['reference'].shape)
+    synthetic = Bernoulli_Gamma_synthetic(
+        xrange=[0, 60],
+        batch_size=batch_size,
+        nc_bounds=[80, 100],
+        nt_bounds=[40, 80],
+        device='cpu',
+        kernel='eq',
+        l=1,
+        gp_mean=0,
+        num_ref_points=30, # cost of creating each batch scales with O(num_ref_points^2)
+    )
 
-    plt.imshow(batch['reference'], vmin=0, cmap='Pastel2') # 'turbo' cmap
-    plt.colorbar()
-    plt.show()
+    i = 0
+    for batch in range(num_batches):
+
+        batch = synthetic.epoch()[0]
+
+        for task in range(batch_size):
+
+            # each (c, n)
+            xc = batch['xc'][task]
+            yc = batch['yc'][task]
+            xt = batch['xt'][task]
+            yt = batch['yt'][task]
+            reference = batch['reference'][task]
+
+            yc_bernoulli = yc[1:2] # (1, n)
+            yt_bernoulli = yt[1:2]
+
+            yc_gamma = torch.tensor(np.array([i for i, j in zip(yc[0], yc_bernoulli[0]) if j])).reshape(1, -1) # filtered via bernoulli
+            yt_gamma = torch.tensor(np.array([i for i, j in zip(yt[0], yt_bernoulli[0]) if j])).reshape(1, -1)
+
+            save_batch = {
+                'xc': xc,
+                'xt': xt,
+                'yc_bernoulli': yc_bernoulli,
+                'yt_bernoulli': yt_bernoulli,
+                'yc_gamma': yc_gamma,
+                'yt_gamma': yt_gamma,
+                'reference': reference,
+            }
+
+            torch.save(save_batch, f'synthetic_data/synthetic-{i}.tensor')
+
+            i += 1

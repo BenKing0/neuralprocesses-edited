@@ -293,7 +293,7 @@ def main(config, _config):
             bernoulli_only_GP(batch_size=1, nc_bounds=nc_bounds, nt_bounds=nt_bounds, reference=True,  device=device),
         ]
     elif config.data == 'bernoulli_only_MoG': 
-        means = [[0, 0] , [60, 60]]
+        means = [[10, 10] , [50, 50]]
         covariances = [5*np.eye(2), 5*np.eye(2)]
         dim_x = 2              
         gen_train, gen_cv, gens_eval = [    
@@ -477,7 +477,7 @@ if __name__ == '__main__':
         "num_samples": 20, 
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "num_batches": 16,
+        "num_batches": 2,
         "discretisation": 1,
         "encoder_channels": 32,
         "decoder_channels": 32,

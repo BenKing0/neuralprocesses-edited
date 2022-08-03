@@ -253,3 +253,50 @@ class gp_cutoff:
             epoch.append(batch)
 
         return epoch   
+
+
+class synthetic_bernoulli_reader:
+
+
+    def __init__(self, num_batches = 1, batch_size = 16, starting_ind = 0, device= 'cpu'):
+        self.path = 'synthetic_data/'
+        self.i = starting_ind
+        self.batch_size = batch_size
+        self.num_batches = num_batches
+        self.device = device
+
+    
+    def epoch(self):
+
+        epoch = []
+        for _ in range(self.num_batches):
+
+            xc, yc, xt, yt, reference = [], [], [], [], []
+            for _ in range(self.batch_size):
+
+                try:
+                    torch.load(self.path + f'synthetic-{self.i}.tensor')
+                except:
+                    print(f'Ran out of tasks to load. {self.batch_size*self.num_batches} is greater than number of tasks. Will repeat tasks.')
+                    self.i = 0
+
+                read_task = torch.load(self.path + f'synthetic-{self.i}.tensor')
+                xc.append(read_task['xc'])
+                xt.append(read_task['xt'])
+                yc.append(read_task['yc_bernoulli'])
+                yt.append(read_task['yt_bernoulli'])
+                reference.append(read_task['reference'])
+                
+                self.i += 1
+
+            batch = {
+                'xc': torch.stack(xc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }
+
+        epoch.append(batch)
+
+        return epoch

@@ -132,17 +132,22 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         hmap_probs = np.mean(hmap_probs_multi, axis=0)
         hmap_probs = B.to_numpy(hmap_probs).reshape((num, num))
 
-        ref_xs, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
-        ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
-        ref_probs = []
-        for _ in range(num_samples):
-            _, ref_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, ref_xs))
-            ref_probs.append(ref_dist.probs[0][hmap_class])
+        try:
+            ref_xs, ref_ys = list(zip(*batch['reference'][0])) # this is a list(zip(ref_xs, ref_ys))
+            ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
+            ref_probs = []
+            for _ in range(num_samples):
+                _, ref_dist = model(state, batch['xc'], batch['yc'], B.cast(torch.float32, np.array(ref_xs)).reshape(2, -1))
+                ref_probs.append(ref_dist.probs[0][hmap_class])
 
-        memberships = np.where(np.mean(ref_probs, axis=0) > 0.5, 1., 0.)
-        correct = np.where(memberships==ref_ys.flatten(), 1, 0)
-        accuracy = np.sum(correct.flatten()) / len(correct.flatten())
-        print(correct)
+            ref_probs = torch.mean(torch.stack(ref_probs), axis=0)
+            memberships = torch.where(ref_probs > 0.5, 1., 0.)
+            correct = torch.where(memberships==torch.tensor(ref_ys).to(device).flatten(), 1, 0)
+            accuracy = torch.sum(correct.flatten()) / len(correct.flatten())
+        
+        except ValueError:
+            ref_ys = batch['reference'][0]
+            ref_ys = np.array(ref_ys).reshape((30, 30)) # number of reference points hard-coded to 30
 
         sns.set_theme()
         _, (ax1, ax2) = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10,5))
@@ -154,7 +159,7 @@ def plot_classifier_2d(state, model, gen, save_path, hmap_class: int = 0, device
         for class_, _ in groups:
             x = x_dict[class_]
             ax1.scatter(x[:,0], x[:,1], marker=next(markers), c='k', s=0.5)
-        ax1.text(5, 5, f'Accuracy: {accuracy:.2d}')
+        # ax1.text(5, 5, f'Accuracy: {accuracy:.2f}')
         if B.max(memberships) == 1:
             ax1.set_title('Colormap scaled by class 1')
         else:

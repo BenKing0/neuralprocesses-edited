@@ -48,7 +48,7 @@ def plot_2d(
 
     hmap_rain = np.zeros(hmap_kappa.shape[-1])
     for i, (kappa_i, chi_i) in enumerate(zip(hmap_kappa.reshape(-1), hmap_chi.reshape(-1))):
-        sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=chi_i.detach().cpu().numpy(), size=num_samples))
+        sample_i = np.mean(np.random.gamma(shape=kappa_i.detach().cpu().numpy(), scale=1/chi_i.detach().cpu().numpy(), size=num_samples))
         hmap_rain[i] = sample_i
     hmap_rain = hmap_rain.reshape((num, num)) # (num^2,) => (num, num)
 
@@ -58,7 +58,7 @@ def plot_2d(
     if reference:
         _, (ax1, ax2) = plt.subplots(1, 2, sharex = True, sharey = True, figsize = (10,20))
         plot1 = ax1.imshow(hmap_rain, cmap='plasma', alpha=0.5, vmin=0, vmax=np.max(ref_vals), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
-        ax1.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.1)
+        ax1.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.2)
         ax1.set_title(f'Model Predicted')
         plot2 = ax2.imshow(ref_vals, alpha = 0.5, cmap='plasma', vmin=0, vmax=np.max(ref_vals), extent=[xbounds[0], xbounds[1], ybounds[0], ybounds[1]])
         ax2.set_title(f'Ground Truth')
@@ -68,7 +68,7 @@ def plot_2d(
         plt.close()
     else:
         plt.imshow(hmap_rain, cmap='plasma', alpha=0.5, vmin=0)
-        plt.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.1)
+        plt.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.2)
         plt.colorbar()
         plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
         plt.close()

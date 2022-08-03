@@ -9,7 +9,7 @@ import numpy as np
 from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
-from torch_classification_data_gens import example_data_gen, gp_cutoff
+from torch_classification_data_gens import example_data_gen, gp_cutoff, synthetic_bernoulli_reader
 from torch_classification_plotting import plot_classifier_1d, plot_classifier_2d
 shutup.please()
 
@@ -143,7 +143,6 @@ def train(state, model, opt, objective, gen, *, epoch):
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
         val = -B.mean(obj)
-        print(obj, val)
         opt.zero_grad(set_to_none=True)
         val.backward()
         opt.step()
@@ -213,7 +212,7 @@ def main(config, _config):
     )
 
     # Tensors are always of the form `(b, c, n)`.
-    if config.data not in ['binary_MoG', 'gp_cutoff']:
+    if config.data not in ['binary_MoG', 'gp_cutoff', 'synthetic']:
         print('Data generator has to be a classification one, defaulting to Binary MoG.')
         config.data = 'binary_MoG'
 
@@ -239,6 +238,13 @@ def main(config, _config):
             gp_cutoff(config.dim_x, xrange, batch_size=config.batch_size, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=False),
             gp_cutoff(config.dim_x, xrange, batch_size=1, device=device, cutoff='zero', nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
+
+    elif config.data == 'synthetic':
+        gen_train, gen_cv, gens_eval = [
+            synthetic_bernoulli_reader(batch_size=config.batch_size),
+            synthetic_bernoulli_reader(batch_size=config.batch_size),
+            synthetic_bernoulli_reader(batch_size=config.batch_size),
+        ]
 
     else:
         pass
@@ -360,11 +366,11 @@ if __name__ == '__main__':
         "model": 'ConvCorrBNP',
         "dim_x": 2,
         "dim_y": 1, # NOTE: Has to be the case for binary classification
-        "dim_lv": 2, # TODO: is a high LV dim detramental?
-        "data": 'gp_cutoff',
+        "dim_lv": 16, # TODO: is a high LV dim detramental?
+        "data": 'synthetic',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 30,
+        "epochs": 100,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
@@ -378,7 +384,7 @@ if __name__ == '__main__':
         "plot_num_samples": 1,
         "fix_noise": True, # NOTE: Not implemented
         "batch_size": 16,
-        "discretisation": 2, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
+        "discretisation": 1, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
         "nc_bounds": [80, 100],
         "nt_bounds": [40, 50],
         ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases

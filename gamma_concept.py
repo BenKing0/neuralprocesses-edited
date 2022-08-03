@@ -14,12 +14,11 @@ import experiment as exp
 class GammaDistribution:
 
     def __init__(self, params, device):
-        self.kappa = torch.ones(params[..., 0:1, :].shape) + params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n). NOTE: if 0 <= kappa <=1 then logpdf maximised with y=0. Else minimised.
+        self.kappa = torch.ones(params[..., 0:1, :].shape).to(device) + params[..., 0:1, :] # shape (*b, c=2, n) -> (*b, 1, n). NOTE: if 0 <= kappa <=1 then logpdf maximised with y=0. Else minimised.
         self.chi = B.log(1e-3 + B.exp(params[..., 1:2, :])) # shape (*b, c=2, n) -> (*b, 1, n). NOTE: banded from 0 (is never == 0).
         self.device = device
 
         print(f'\nKappa range: {torch.min(self.kappa.flatten()):.2f} to {torch.max(self.kappa.flatten()):.2f}')
-        # TODO: kappa is going to 0 to make the mean of the dist (kappa / chi) tend to 0
         print(f'Chi range: {torch.min(self.chi.flatten()):.2f} to {torch.max(self.chi.flatten()):.2f}\n')
 
     def logpdf(self, y_amount):
@@ -329,7 +328,7 @@ if __name__ == '__main__':
         "likelihood": 'gamma',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'ConvCorrGNP',
+        "model": 'CorrConvGNP',
         "dim_x": 2,
         "dim_y": 1, # NOTE: Has to be the case for binary classification
         "dim_lv": 16, # TODO: is a high LV dim detrimental?
