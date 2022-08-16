@@ -1,3 +1,4 @@
+from tkinter import TRUE
 import shutup
 from sklearn.metrics import mean_poisson_deviance
 import neuralprocesses.torch as nps
@@ -18,7 +19,6 @@ class BernoulliDistribution(torch.nn.Module):
     def __init__(self, probs):
         super().__init__()
         self.probs = probs
-        # print(self.probs)
 
     def logpdf(self, y): 
         # y of shape (b, 1, n) and self.probs of shape (*b, 1, n). Any broadcasting done automatically.
@@ -38,9 +38,9 @@ class BernoulliDistribution(torch.nn.Module):
 
 
 def construct_bernoulli_model(  
-    dim_x = 1, 
+    dim_x = 2, 
     dim_y = 1, 
-    dim_lv = 16,
+    dim_lv = 0,
     lv_likelihood = 'lowrank',
     discretisation = 16,
     ):
@@ -70,7 +70,6 @@ def construct_bernoulli_model(
 
 
     # CNN architecture:
-    ##TODO: finish making dim_lv = 0 capable
     decoder_channels = (32,) * 6
     encoder_channels = (32,) * 6
     if dim_lv > 0:
@@ -119,7 +118,7 @@ def construct_bernoulli_model(
     decoder = nps.Chain(
         unet,
         nps.SetConv(scale=1 / disc.points_per_unit),
-        lambda z: BernoulliDistribution(B.sigmoid(z)),  ## softplus trained way faster but caused numerical issues when self.probs > 1
+        lambda z: BernoulliDistribution(B.sigmoid(z)),
     )
     model = nps.Model(encoder, decoder)
 
@@ -138,7 +137,6 @@ def train(state, model, opt, objective, gen, *, epoch):
             batch["yc"],
             batch["xt"],
             batch["yt"],
-            # epoch=epoch,
         )
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
@@ -147,7 +145,6 @@ def train(state, model, opt, objective, gen, *, epoch):
         val.backward()
         opt.step()
     
-    ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
     vals = np.array(vals)
     out.kv("Loglik (T)", exp.with_err(B.concat(*vals)))
     return state, B.mean(B.concat(*vals))
@@ -167,10 +164,8 @@ def eval(state, model, objective, gen):
                 batch["yt"],
             )
 
-            # Save numbers.
             vals.append(B.to_numpy(obj))
 
-        ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
         out.kv("Loglik (V)", exp.with_err(B.concat(*vals)))
         return state, B.mean(B.concat(*vals))
 
@@ -212,7 +207,7 @@ def main(config, _config):
     )
 
     # Tensors are always of the form `(b, c, n)`.
-    if config.data not in ['binary_MoG', 'gp_cutoff', 'synthetic']:
+    if config.data not in ['binary_MoG', 'gp_cutoff', 'synthetic', 'real_rainfall']:
         print('Data generator has to be a classification one, defaulting to Binary MoG.')
         config.data = 'binary_MoG'
 
@@ -241,9 +236,16 @@ def main(config, _config):
 
     elif config.data == 'synthetic':
         gen_train, gen_cv, gens_eval = [
-            synthetic_bernoulli_reader(batch_size=config.batch_size),
-            synthetic_bernoulli_reader(batch_size=config.batch_size),
-            synthetic_bernoulli_reader(batch_size=config.batch_size),
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=1200, device=device),
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=1200, device=device),
+        ]
+
+    elif config.data == 'real_rainfall':
+        gen_train, gen_cv, gens_eval = [
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_bernoulli_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
         ]
 
     else:
@@ -281,7 +283,7 @@ def main(config, _config):
             if config.dim_x == 1:
                 plot_classifier_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
             elif config.dim_x == 2:
-                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
+                plot_classifier_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device, data_name=config.data)
 
         with out.Section('ELBO'):
             state, _ = eval(state, model, objective_eval, gen_cv)
@@ -346,7 +348,7 @@ def main(config, _config):
                 if config.dim_x == 1:
                     plot_classifier_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", means=means, vars=covariances, prior=priors, device=device)
                 elif config.dim_x == 2:
-                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device)
+                    plot_classifier_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device, data_name=config.data)
 
 
 if __name__ == '__main__':
@@ -363,31 +365,28 @@ if __name__ == '__main__':
         "likelihood": 'bernoulli',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'ConvCorrBNP',
-        "dim_x": 2,
+        "model": 'CorrConvBNP',
+        "dim_x": 1,
         "dim_y": 1, # NOTE: Has to be the case for binary classification
-        "dim_lv": 16, # TODO: is a high LV dim detramental?
-        "data": 'synthetic',
+        "dim_lv": 16, 
+        "data": 'binary_MoG',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
         "epochs": 100,
         "resume_at_epoch": None, 
         "train_test": None,
         "evaluate": False,
-        "evaluate_fast": False, # NOTE: Not implemented
         "rate": 3e-4,
         "evaluate_last": False,
         "evaluate_num_samples": 1024,
         "num_samples": 20,
         "evaluate_last": False,
-        "evaluate_plot_num_samples": 15,
+        "evaluate_plot_num_samples": 1,
         "plot_num_samples": 1,
-        "fix_noise": True, # NOTE: Not implemented
         "batch_size": 16,
         "discretisation": 1, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
-        "nc_bounds": [80, 100],
-        "nt_bounds": [40, 50],
-        ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
+        "nc_bounds": [5, 10],
+        "nt_bounds": [10, 20],
     }
 
     if _config['evaluate']:

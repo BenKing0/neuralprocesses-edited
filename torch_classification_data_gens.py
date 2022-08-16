@@ -52,8 +52,8 @@ class example_data_gen:
 
     def epoch(self):
 
-        ##NOTE: add noise to means and covariances so that they are different tasks for meta learning:
-        ##NOTE: new covariances must be PSD!
+        # NOTE: add noise to means and covariances so that they are different tasks for meta learning:
+        # NOTE: new covariances must be PSD!
         _means = []
         _covars = []
         for i, mean in enumerate(self.means):
@@ -259,12 +259,12 @@ class synthetic_bernoulli_reader:
 
 
     def __init__(self, num_batches = 1, batch_size = 16, starting_ind = 0, device= 'cpu'):
-        self.path = 'synthetic_data/'
+        self.path = 'real_data/'
         self.i = starting_ind
         self.batch_size = batch_size
         self.num_batches = num_batches
         self.device = device
-
+        
     
     def epoch(self):
 
@@ -275,19 +275,28 @@ class synthetic_bernoulli_reader:
             for _ in range(self.batch_size):
 
                 try:
-                    torch.load(self.path + f'synthetic-{self.i}.tensor')
+                    torch.load(self.path + f'real-{self.i}.tensor')
                 except:
                     print(f'Ran out of tasks to load. {self.batch_size*self.num_batches} is greater than number of tasks. Will repeat tasks.')
                     self.i = 0
 
-                read_task = torch.load(self.path + f'synthetic-{self.i}.tensor')
+                read_task = torch.load(self.path + f'real-{self.i}.tensor')
                 xc.append(read_task['xc'])
                 xt.append(read_task['xt'])
                 yc.append(read_task['yc_bernoulli'])
                 yt.append(read_task['yt_bernoulli'])
                 reference.append(read_task['reference'])
+
+                # TODO: restrict number of points (expanded to have more for gamma fitting)
                 
                 self.i += 1
+
+            min_len_c = min([i.shape[1] for i in xc])
+            min_len_t = min([i.shape[1] for i in xt])
+            xc = [i[:, :min_len_c] for i in xc]
+            xt = [i[:, :min_len_t] for i in xt]
+            yc = [i[:, :min_len_c] for i in yc]
+            yt = [i[:, :min_len_t] for i in yt]
 
             batch = {
                 'xc': torch.stack(xc).to(self.device),

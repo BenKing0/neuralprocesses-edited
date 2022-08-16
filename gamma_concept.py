@@ -6,7 +6,7 @@ from plum import convert
 from functools import partial
 from wbml.experiment import WorkingDirectory
 import wbml.out as out
-from torch_gamma_data_gens import gp_example
+from torch_gamma_data_gens import gp_example, synthetic_gamma_reader
 from torch_gamma_plotting import plot_1d, plot_2d
 import experiment as exp
 
@@ -24,6 +24,7 @@ class GammaDistribution:
     def logpdf(self, y_amount):
         # each of shape (b, 1, n) whereas kappa, chi possibly of shape (s, b, 1, n), but broadcasting is automatic.
             
+        self.inside_sum = (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa)
         return B.sum(
             (self.kappa - 1) * torch.nan_to_num(torch.log(y_amount), 0.) - self.chi * y_amount + self.kappa * torch.log(self.chi) - torch.lgamma(self.kappa),
             axis=(-2, -1),
@@ -60,7 +61,6 @@ def construct_gamma_model(
 
 
     # CNN architecture:
-    # TODO: finish making dim_lv = 0 capable
     decoder_channels = (32,) * 6
     encoder_channels = (32,) * 6
     if dim_lv > 0:
@@ -128,7 +128,6 @@ def train(state, model, opt, objective, gen, *, epoch):
             batch["yc"],
             batch["xt"],
             batch["yt"],
-            # epoch=epoch,
         )
         vals.append(B.to_numpy(obj))
         # Be sure to negate the output of `objective`.
@@ -137,7 +136,6 @@ def train(state, model, opt, objective, gen, *, epoch):
         val.backward()
         opt.step()
     
-    ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
     vals = np.array(vals)
     out.kv("Loglik (T)", exp.with_err(B.concat(*vals)))
     return state, B.mean(B.concat(*vals))
@@ -157,10 +155,8 @@ def eval(state, model, objective, gen):
                 batch["yt"],
             )
 
-            # Save numbers.
             vals.append(B.to_numpy(obj))
 
-        ## changed as outputs are 1d from decoder now. Takes '*vals' as a 1D numpy array:
         out.kv("Loglik (V)", exp.with_err(B.concat(*vals)))
         return state, B.mean(B.concat(*vals))
 
@@ -202,7 +198,7 @@ def main(config, _config):
     )
 
     # Tensors are always of the form `(b, c, n)`.
-    if config.data not in ['gamma_gp']:
+    if config.data not in ['gamma_gp', 'synthetic', 'real_rainfall']:
         print(f'Data generator {config.data} not implemented, defaulting to Example')
         config.data = 'gamma_gp'
 
@@ -213,6 +209,19 @@ def main(config, _config):
             gp_example(dim_x=dim_x, batch_size=config.batch_size, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds),
             gp_example(dim_x=dim_x, batch_size=1, device=device, nc_bounds=config.nc_bounds, nt_bounds=config.nt_bounds, reference=True),
             ]
+    elif config.data == 'synthetic':
+        gen_train, gen_cv, gens_eval = [
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=1200, device=device),
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=1200, device=device),
+        ]
+    
+    elif config.data == 'real_rainfall':
+        gen_train, gen_cv, gens_eval = [
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+            synthetic_gamma_reader(num_batches=1, batch_size=config.batch_size, starting_ind=0, device=device),
+        ]
 
     objective = partial(
             nps.elbo,
@@ -246,10 +255,10 @@ def main(config, _config):
             if config.dim_x == 1:
                 plot_1d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device)
             elif config.dim_x == 2:
-                plot_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True)
+                plot_2d(state, model, gens_eval, wd.file()+f"/evaluate-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True, data_name=config.data)
 
         with out.Section('ELBO'):
-            state, _ = eval(state, model, objective_eval, gen_cv)
+            state, _ = eval(state, model, objective_eval, gens_eval)
 
 
     ## In a training regime:
@@ -311,7 +320,7 @@ def main(config, _config):
                 if config.dim_x == 1:
                     plot_1d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device)
                 elif config.dim_x == 2:
-                    plot_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True)
+                    plot_2d(state, model, gens_eval, wd.file()+f"/train-{i + 1:03d}.png", device=device, xbounds=[0, 60], ybounds=[0, 60], reference=True, data_name=config.data)
 
 
 if __name__ == '__main__':
@@ -328,18 +337,17 @@ if __name__ == '__main__':
         "likelihood": 'gamma',
         "arch": 'unet',
         "objective": 'elbo',
-        "model": 'CorrConvGNP',
+        "model": 'ConvCGNP',
         "dim_x": 2,
-        "dim_y": 1, # NOTE: Has to be the case for binary classification
-        "dim_lv": 16, # TODO: is a high LV dim detrimental?
+        "dim_y": 1, # NOTE: higher dimensional ys not implemented
+        "dim_lv": 0,
         "data": 'gamma_gp',
         "lv_likelihood": 'lowrank',
         "root": ["_experiments"],
-        "epochs": 30,
+        "epochs": 100,
         "resume_at_epoch": None, 
         "train_test": None,
-        "evaluate": False,
-        "evaluate_fast": False, # NOTE: Not implemented
+        "evaluate": True,
         "rate": 3e-4,
         "evaluate_last": False,
         "evaluate_num_samples": 1024,
@@ -347,12 +355,10 @@ if __name__ == '__main__':
         "evaluate_last": False,
         "evaluate_plot_num_samples": 15,
         "plot_num_samples": 1,
-        "fix_noise": True, # NOTE: Not implemented
         "batch_size": 16,
         "discretisation": 1, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
-        "nc_bounds": [80, 100],
-        "nt_bounds": [40, 50],
-        ## number of training/validation/evaluation points not implemented, instead gives number of points per batch (approx. 15) * num_batches points for all three cases
+        "nc_bounds": [1, 10],
+        "nt_bounds": [160, 200],
     }
 
     if _config['evaluate']:

@@ -6,6 +6,7 @@ import seaborn as sns
 from typing import Tuple
 import numpy as np
 from tqdm import tqdm
+import pandas as pd
 
 
 def plot_1d():
@@ -22,6 +23,7 @@ def plot_2d(
     reference: bool = False,
     device: str = 'cpu',
     num_samples: int = 1,
+    data_name = None,
     ):
     sns.set_theme()
 
@@ -52,7 +54,10 @@ def plot_2d(
         hmap_rain[i] = sample_i
     hmap_rain = hmap_rain.reshape((num, num)) # (num^2,) => (num, num)
 
-    _, ref_vals = list(zip(*batch['reference'][0]))
+    try:
+        _, ref_vals = list(zip(*batch['reference'][0]))
+    except ValueError:
+        ref_vals = batch['reference'][0]
     ref_vals = np.array(ref_vals).reshape((30, 30)) # 30 hardcoded into reference
 
     if reference:
@@ -64,11 +69,53 @@ def plot_2d(
         ax2.set_title(f'Ground Truth')
         plt.colorbar(plot1, ax=ax1, shrink=0.15)
         plt.colorbar(plot2, ax=ax2, shrink=0.15)
-        plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
+        plt.savefig('/'.join(save_path.split('/'))+f'', bbox_inches = 'tight', dpi = 300)
         plt.close()
     else:
         plt.imshow(hmap_rain, cmap='plasma', alpha=0.5, vmin=0)
         plt.scatter(B.to_numpy(batch['xc'])[0, 0], B.to_numpy(batch['xc'])[0, 1], marker = 'o', color='k', label='Context Points', s=0.2)
         plt.colorbar()
-        plt.savefig(save_path, bbox_inches = 'tight', dpi = 300)
+        plt.savefig('/'.join(save_path.split('/'))+f'', bbox_inches='tight', dpi=300)
         plt.close()
+
+    if data_name == 'synthetic':
+        directory = '/'.join(save_path.split('/')[:-1])
+        file_id = generator.i
+        filename = directory + f'/gamma-results-{file_id}.csv'
+
+        ref_xs = np.linspace(0, 58, 30)
+        ref_xs = np.meshgrid(ref_xs, ref_xs) ## of shape (2, 30, 30) = (coords, xs, ys)
+        ref_xs = np.array(ref_xs).reshape((2, 30**2)) ## of shape (2, 30 ^ 2)
+
+        contents = {
+            'x': pd.Series(hmap_X[0][0]),
+            'y': pd.Series(hmap_X[0][1]),
+            'rain': pd.Series(hmap_rain.reshape(num**2)),
+            'xref': pd.Series(ref_xs[0]),
+            'yref': pd.Series(ref_xs[1]),
+            'rain_ref': pd.Series(ref_vals.reshape(900)),
+        }
+
+        file = pd.DataFrame(contents)
+        file.to_csv(filename)
+
+    elif data_name == 'real_rainfall':
+            directory = '/'.join(save_path.split('/')[:-1])
+            file_id = generator.i
+            filename = directory + f'/gamma-real-results-{file_id}.csv'
+
+            ref_xs = np.linspace(0, 58, 30)
+            ref_xs = np.meshgrid(ref_xs, ref_xs) ## of shape (2, 30, 30) = (coords, xs, ys)
+            ref_xs = np.array(ref_xs).reshape((2, 30**2)) ## of shape (2, 30 ^ 2)
+
+            contents = {
+                'x': pd.Series(hmap_X[0][0]),
+                'y': pd.Series(hmap_X[0][1]),
+                'rain': pd.Series(hmap_rain.reshape(num**2)),
+                'xref': pd.Series(ref_xs[0]),
+                'yref': pd.Series(ref_xs[1]),
+                'rain_ref': pd.Series(ref_vals.reshape(900)),
+            }
+
+            file = pd.DataFrame(contents)
+            file.to_csv(filename)

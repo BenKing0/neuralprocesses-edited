@@ -41,7 +41,6 @@ class gp_example:
 
     def _construct_gp_sample(self, xs, ref_xs, gram):
 
-        # gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
         gp_sample = lambda x: np.random.multivariate_normal(np.zeros(np.array(x).shape[0]), np.array(gram(x))) ## assumes mean 0 for gp
 
         if self.reference:
@@ -106,6 +105,88 @@ class gp_example:
                 'xc': torch.stack(xc).to(self.device),
                 'yc': torch.stack(yc).to(self.device),
                 'xt': torch.stack(xt).to(self.device),
+                'yt': torch.stack(yt).to(self.device),
+                'reference': reference,
+            }
+
+            epoch.append(batch)
+
+        return epoch
+
+
+class synthetic_gamma_reader:
+
+
+    def __init__(self, num_batches = 1, batch_size = 16, starting_ind = 0, device= 'cpu'):
+        self.path = 'real_data/'
+        self.i = starting_ind
+        self.batch_size = batch_size
+        self.num_batches = num_batches
+        self.device = device
+
+    
+    def epoch(self):
+
+        epoch = []
+        for _ in range(self.num_batches):
+
+            xc, yc, xt, yt, reference = [], [], [], [], []
+            for _ in range(self.batch_size):
+
+                try:
+                    torch.load(self.path + f'real-{self.i}.tensor')
+                except:
+                    print(f'Ran out of tasks to load. {self.batch_size*self.num_batches} is greater than number of tasks. Will repeat tasks.')
+                    self.i = 0
+
+                read_task = torch.load(self.path + f'real-{self.i}.tensor')
+                yc_gamma = read_task['yc_gamma']
+                yt_gamma = read_task['yt_gamma']
+                xc_gamma = read_task['xc']
+                xt_gamma = read_task['xt']
+
+                filt_xc_gamma, filt_yc_gamma = [], []
+                for i, j in zip(xc_gamma.reshape(-1, 2), yc_gamma.reshape(-1, 1)):
+                    if j > 0:
+                        filt_xc_gamma.append(i)
+                        filt_yc_gamma.append(j)
+
+                filt_xt_gamma, filt_yt_gamma = [], []
+                for i, j in zip(xt_gamma.reshape(-1, 2), yt_gamma.reshape(-1, 1)):
+                    if j > 0:
+                        filt_xt_gamma.append(i)
+                        filt_yt_gamma.append(j)
+
+                try:
+                    xc_gamma = torch.stack(filt_xc_gamma).reshape(2, -1)
+                    yc_gamma = torch.stack(filt_yc_gamma).reshape(1, -1)
+                    xt_gamma = torch.stack(filt_xt_gamma).reshape(2, -1)
+                    yt_gamma = torch.stack(filt_yt_gamma).reshape(1, -1)
+                except RuntimeError:
+                    xc_gamma = xc_gamma.reshape(2, -1)
+                    yc_gamma = torch.zeros(xc_gamma.shape).reshape(1, -1)
+                    xt_gamma = xt_gamma.reshape(2, -1)
+                    yt_gamma = torch.zeros(xt_gamma.shape).reshape(1, -1)
+
+                xc.append(xc_gamma)
+                xt.append(xt_gamma)
+                yc.append(yc_gamma)
+                yt.append(yt_gamma)
+                reference.append(read_task['reference'])
+                
+                self.i += 1
+
+            min_len_c = min([i.shape[1] for i in xc])
+            min_len_t = min([i.shape[1] for i in xt])
+            xc = [i[:, :min_len_c] for i in xc]
+            xt = [i[:, :min_len_t] for i in xt]
+            yc = [i[:, :min_len_c] for i in yc]
+            yt = [i[:, :min_len_t] for i in yt]
+
+            batch = {
+                'xc': torch.stack(xc).to(self.device),
+                'xt': torch.stack(xt).to(self.device),
+                'yc': torch.stack(yc).to(self.device),
                 'yt': torch.stack(yt).to(self.device),
                 'reference': reference,
             }
