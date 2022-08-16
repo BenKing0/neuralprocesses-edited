@@ -1,4 +1,4 @@
-# [Neural Processes (Edited Version by Benedict King)](http://github.com/wesselb/neuralprocesses)
+# [Neural Processes (Original Documentation)](http://github.com/wesselb/neuralprocesses)
 
 [![CI](https://github.com/wesselb/neuralprocesses/workflows/CI/badge.svg)](https://github.com/wesselb/neuralprocesses/actions?query=workflow%3ACI)
 [![Coverage Status](https://coveralls.io/repos/github/wesselb/neuralprocesses/badge.svg?branch=main)](https://coveralls.io/github/wesselb/neuralprocesses?branch=master)
@@ -454,3 +454,7 @@ dist = convgnp(
     aux_t=B.randn(tf.float32, 16, dim_aux_t, 15),
 )
 ```
+
+### Edits by Benedict King:
+
+This repo contains alterations on the original models, for example to include Bernoulli and Gamma decoder likleihoods; run significance testing between models; execute a rainfall prediction experiment; and construct a correlated convolutional neural process and test on original regression experiments. See additional code for details.
