@@ -455,6 +455,6 @@ dist = convgnp(
 )
 ```
 
-### Edits by Benedict King:
+# Edits by Benedict King:
 
 This repo contains alterations on the original models, for example to include Bernoulli and Gamma decoder likleihoods; run significance testing between models; execute a rainfall prediction experiment; and construct a correlated convolutional neural process and test on original regression experiments. See additional code for details.
