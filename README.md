@@ -461,7 +461,7 @@ This repo contains alterations on the original models, for example to include Be
 
 ### Example - Running the Bernoulli likelihood CorrConvNP:
 
-Define the following config in the 'if __name__ == '__main__':' section:
+Define the following config in the ```if __name__ == '__main__':``` section:
 
 ```
 _config = {
