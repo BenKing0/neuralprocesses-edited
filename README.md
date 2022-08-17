@@ -458,3 +458,56 @@ dist = convgnp(
 # Edits by Benedict King:
 
 This repo contains alterations on the original models, for example to include Bernoulli and Gamma decoder likleihoods; run significance testing between models; execute a rainfall prediction experiment; and construct a correlated convolutional neural process and test on original regression experiments. See additional code for details.
+
+### Example - Running the Bernoulli likelihood CorrConvNP:
+
+Define the following config in the 'if __name__ == '__main__':' section:
+
+```
+_config = {
+        "likelihood": 'bernoulli',
+        "arch": 'unet',
+        "objective": 'elbo',
+        "model": 'CorrConvBNP',
+        "dim_x": 1,
+        "dim_y": 1, # NOTE: Has to be the case for binary classification
+        "dim_lv": 16, 
+        "data": 'gp_cutoff',
+        "lv_likelihood": 'lowrank',
+        "root": ["_experiments"],
+        "epochs": 100,
+        "resume_at_epoch": None, 
+        "train_test": None,
+        "evaluate": False,
+        "rate": 3e-4,
+        "evaluate_last": False,
+        "evaluate_num_samples": 1024,
+        "num_samples": 20,
+        "evaluate_last": False,
+        "evaluate_plot_num_samples": 1,
+        "plot_num_samples": 1,
+        "batch_size": 16,
+        "discretisation": 1, # NOTE: make small when dealing with large xrange (e.g. on gp-cutoff)
+        "nc_bounds": [5, 10],
+        "nt_bounds": [10, 20],
+    }
+```
+"model" changes only the naming system, not the architecture. To make the CorrConvNP architecture, use "lowrank" as the "lv_likelihood" and "dim_lv" > 0. For a ConvNP set the "lv_likelihood" to "het" instead to remove correlations in the encoder likelihood.
+
+If you wish to build a conditional model, then set "dim_lv" = 0. This makes the "lv_likelihood" redundant. For a ConvGNP make sure the decoder likelihood is "lowrank" rather than "het" and the correct number of embedding output channels are set. For the Bernoulli and Gamma models this will have to be done in the model construction function as changing from the default "het" decoder likelihood has not been implemented for these scripts. 
+
+Setting "arch" affects the file system name, but again does not change the architecture for the Bernoulli and Gamma scripts as only a UNet is implemented. To change the architecture change the "encoder" and "decoder" networks in the "construct_bernoulli_model" function.
+
+Setting "evaluate" to True engages the evaluation regime, where by default the best saved model parameters are loaded to the model and the model is run in a test-time setting without backpropagation. Setting "evaluate_last" to True overwrites the evaluation model loading, and instead loads the saved parameters from the last iteration of training, whether it gave the best validation scores or not.
+
+Changing "data" changes the type of dataset loaded. The supported ones are as follows (note that choosing an unsupported one throws an error message and defaults to a binary MoG experiment):
+
+1. 'binary_MoG': a binary mixture of Gaussians in any set x dimension. Note however that plotting functionality is only built for 1D and 2D, so an error will be caused from the plotting script if you set "dim_y" > 2 and do not comment out the plotting functions. Make sure in the "main()" function that the means and variances are set to the desired values and are of the correct dimension as specified in the config. The x domain also must be specified here, so make sure it lines up with the means and variances. By default the domain is [-60, 60] in 2D as in the thesis report.
+
+2. 'gp_cutoff': a GP-cutoff classifier in arbitrary dimension. Again plotting is only supported in 1D or 2D. Lengthscale and kernel type can be changed as desired, but the only built-in kernel is the Exponentiated Quadratic (any other must be coded into "torch_classification_data_gens.py".)
+
+3. 'synthetic': loads the synthetic rainfall dataset that was generated using "rainfall_data.py" (you will need to run this script first to generate the data and make sure the file locations match up). This is only defined for 2D input, 1D output data as used in the rainfall experiments.
+
+4. 'real_rainfall': loads the real rainfall dataset that was loaded in "rainfall_data.py" after being downloaded from online. This again produces 2D domain and 1D output data only. 
+
+Note: The "rainfall_data.py" script that produces the synthetic and real rainfall datasets produces and saves torch files that have the form (b, 2, n) for xs and (b, 2, n) for ys, where the first channel of ys is the extent of rainfall and the second is the bernoulli variable. "torch_gamma_data_gens.py" and "torch_classification_data_gens.py" fitler from these saved files to form the required shapes for the Gamma and Bernoulli models respectively, and so so automatically when the correct "data" field is given in their respective "_config"s.
